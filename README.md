@@ -14,12 +14,14 @@ leak traceable back to the specific person and moment it came from.
 See project memory / prior discussion for the full roadmap and phase
 breakdown. Short version:
 
-- **Phase 1 (done, this commit): backend core** — auth, per-asset short-lived
+- **Phase 1 (done): backend core** — auth, per-asset short-lived
   signed tokens, server-side watermarking (images + code snippets rendered
   as watermarked images), access logging. All security-critical logic lives
   here, not in the client.
-- **Phase 2 (next): Flutter Web client** — thin renderer only. Displays what
-  the backend sends; makes no security decisions itself.
+- **Phase 2 (done): Flutter Web client** — thin renderer only. Login,
+  click-through agreement, asset browser, and a canvas-painted viewer for
+  watermarked images/snippets. Makes no security decisions itself — see
+  `frontend/README section` below.
 - **Phase 3+**: real hosting, Android port, optional iOS, optional video DRM
   upgrade. See roadmap for details.
 
@@ -44,6 +46,17 @@ backend/
                           sample placeholders included for testing)
   data/                   SQLite DB file (gitignored)
   scripts/seed.js         Registers sample assets from backend/assets/
+
+frontend/                Flutter app (web + android platforms scaffolded)
+  lib/
+    api/api_client.dart     Talks to the backend; no security logic of its own
+    state/session.dart      Auth/agreement status, session token (in-memory only)
+    screens/                Login, agreement gate, asset list, asset viewer
+    widgets/
+      protected_image_view.dart  Canvas-painted image renderer (not Image/<img>,
+                                   no long-press/right-click save affordance) —
+                                   UX friction, not real security; see threat
+                                   model above
 ```
 
 ## How the security model works
@@ -81,6 +94,25 @@ npm run dev                 # or: npm start
 
 Server listens on `http://localhost:4000`. Try `GET /health`.
 
+In a second terminal:
+
+```bash
+cd frontend
+flutter pub get
+flutter run -d chrome     # requires CHROME_EXECUTABLE set if Chrome isn't
+                           # on PATH as `google-chrome` — see setup notes below
+```
+
+### First-time Flutter/Chrome setup on this machine
+
+- Flutter SDK installed via `git clone -b stable https://github.com/flutter/flutter.git ~/flutter`,
+  with `~/flutter/bin` added to `PATH` in `~/.bashrc`.
+- Chrome: this machine only has `chromium` (snap), not `google-chrome`, so
+  `CHROME_EXECUTABLE=/snap/bin/chromium` is set in `~/.bashrc` so Flutter can
+  find it for `flutter run -d chrome`.
+- Android toolchain (cmdline-tools, `ANDROID_HOME`) is **not** set up yet —
+  deferred to Phase 4 per the roadmap, since web is priority #1.
+
 ## Before sharing this with real outside viewers (not yet done)
 
 - Switch `/api/auth/register` from open self-signup to invite-only account
@@ -91,3 +123,10 @@ Server listens on `http://localhost:4000`. Try `GET /health`.
 - Video watermarking/streaming is not implemented yet (Phase 1 covered
   images + snippets first, per the roadmap) — the `/content` route currently
   returns 501 for video assets.
+- Session token is in-memory only in the Flutter client (lost on page
+  refresh) — deliberate for now; add persistence later as a considered
+  decision, not a default.
+- `ProtectedImageView`'s gesture-blocking (no long-press/right-click save) is
+  UX friction only, not a security boundary — see threat model at the top of
+  this file. The real protection is that bytes are already watermarked
+  server-side before they reach the client.
