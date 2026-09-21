@@ -47,4 +47,35 @@ router.post('/owner', async (req, res) => {
   res.json({ ok: true, action: 'created', userId: info.lastInsertRowid });
 });
 
+// Resets an existing account's password. Same guard/inert-by-default
+// pattern as /owner above — for when you're locked out of an account
+// (e.g. its password was set during early testing and never told to you).
+router.post('/reset-password', async (req, res) => {
+  const configuredSecret = process.env.SETUP_SECRET;
+  if (!configuredSecret) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  const { secret, email, newPassword } = req.body || {};
+  if (secret !== configuredSecret) {
+    return res.status(403).json({ error: 'Invalid setup secret' });
+  }
+  if (typeof email !== 'string' || !email.includes('@')) {
+    return res.status(400).json({ error: 'Valid email is required' });
+  }
+  if (typeof newPassword !== 'string' || newPassword.length < 10) {
+    return res.status(400).json({ error: 'newPassword must be at least 10 characters' });
+  }
+
+  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase());
+  if (!existing) {
+    return res.status(404).json({ error: 'No account with that email' });
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, existing.id);
+
+  res.json({ ok: true, userId: existing.id });
+});
+
 module.exports = router;
