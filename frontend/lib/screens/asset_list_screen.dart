@@ -3,6 +3,10 @@ import 'package:provider/provider.dart';
 import '../api/api_client.dart';
 import '../state/session.dart';
 import 'asset_viewer_screen.dart';
+import 'admin_request_screen.dart';
+import 'admin_review_screen.dart';
+import 'manage_admins_screen.dart';
+import 'manage_assets_screen.dart';
 
 class AssetSummary {
   AssetSummary({required this.id, required this.type, required this.title});
@@ -67,10 +71,71 @@ class _AssetListScreenState extends State<AssetListScreen> {
       appBar: AppBar(
         title: const Text('Shared with you'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sign out (${session.userEmail ?? ''})',
-            onPressed: () => session.signOut(),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              switch (value) {
+                case 'manage_assets':
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ManageAssetsScreen()),
+                  );
+                case 'manage_admins':
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ManageAdminsScreen()),
+                  );
+                case 'review_requests':
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AdminReviewScreen()),
+                  );
+                case 'request_admin':
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AdminRequestScreen()),
+                  );
+                case 'sign_out':
+                  session.signOut();
+              }
+            },
+            itemBuilder: (context) => [
+              if (session.isAdmin)
+                const PopupMenuItem(
+                  value: 'manage_assets',
+                  child: ListTile(
+                    leading: Icon(Icons.folder_shared_outlined),
+                    title: Text('Manage assets'),
+                  ),
+                ),
+              if (session.effectiveMasterAccess) ...[
+                const PopupMenuItem(
+                  value: 'review_requests',
+                  child: ListTile(
+                    leading: Icon(Icons.fact_check_outlined),
+                    title: Text('Review admin requests'),
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'manage_admins',
+                  child: ListTile(
+                    leading: Icon(Icons.admin_panel_settings_outlined),
+                    title: Text('Manage admins'),
+                  ),
+                ),
+              ],
+              if (!session.isAdmin)
+                const PopupMenuItem(
+                  value: 'request_admin',
+                  child: ListTile(
+                    leading: Icon(Icons.upgrade_outlined),
+                    title: Text('Request admin access'),
+                  ),
+                ),
+              PopupMenuItem(
+                value: 'sign_out',
+                child: ListTile(
+                  leading: const Icon(Icons.logout),
+                  title: Text('Sign out (${session.userEmail ?? ''})'),
+                ),
+              ),
+            ],
           ),
         ],
       ),

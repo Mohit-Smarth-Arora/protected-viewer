@@ -19,11 +19,19 @@ class Session extends ChangeNotifier {
   final ApiClient api;
 
   AuthStatus status = AuthStatus.signedOut;
+  int? userId;
   String? userEmail;
   String? userDisplayName;
+  String role = 'viewer'; // 'viewer' | 'admin' | 'owner', set from /me
+  bool hasMasterAccess = false;
   String? _lastError;
 
   String? get lastError => _lastError;
+  bool get isAdmin => role == 'admin' || role == 'owner';
+  bool get isOwner => role == 'owner';
+  // Owner always has effective master access, regardless of the raw flag
+  // (which only stores meaningfully for role='admin' server-side).
+  bool get effectiveMasterAccess => role == 'owner' || hasMasterAccess;
 
   Future<void> login(String email, String password) async {
     _lastError = null;
@@ -36,6 +44,7 @@ class Session extends ChangeNotifier {
     final token = res.body['token'] as String;
     final user = res.body['user'] as Map<String, dynamic>;
     api.setSessionToken(token);
+    userId = user['id'] as int;
     userEmail = user['email'] as String;
     userDisplayName = user['displayName'] as String;
     await _refreshAgreementStatus();
@@ -56,6 +65,7 @@ class Session extends ChangeNotifier {
     final token = res.body['token'] as String;
     final user = res.body['user'] as Map<String, dynamic>;
     api.setSessionToken(token);
+    userId = user['id'] as int;
     userEmail = user['email'] as String;
     userDisplayName = user['displayName'] as String;
     await _refreshAgreementStatus();
@@ -68,10 +78,18 @@ class Session extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    final userInfo = meRes.body['user'] as Map<String, dynamic>;
+    role = userInfo['role'] as String? ?? 'viewer';
+    hasMasterAccess = userInfo['has_master_access'] == 1 || userInfo['has_master_access'] == true;
+
     final accepted = meRes.body['agreementAccepted'] == true;
     status = accepted ? AuthStatus.signedIn : AuthStatus.signedInNeedsAgreement;
     notifyListeners();
   }
+
+  /// Re-pulls /me without changing auth flow state — used after actions
+  /// that might change role/master-access (e.g. own admin request outcome).
+  Future<void> refreshUserInfo() => _refreshAgreementStatus();
 
   Future<void> acceptAgreement() async {
     final res = await api.acceptAgreement();
@@ -86,8 +104,11 @@ class Session extends ChangeNotifier {
 
   void signOut() {
     api.setSessionToken(null);
+    userId = null;
     userEmail = null;
     userDisplayName = null;
+    role = 'viewer';
+    hasMasterAccess = false;
     status = AuthStatus.signedOut;
     notifyListeners();
   }

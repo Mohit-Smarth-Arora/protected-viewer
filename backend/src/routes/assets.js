@@ -7,6 +7,7 @@ const requireAgreement = require('../middleware/requireAgreement');
 const { issueAssetToken, verifyAssetToken } = require('../lib/auth');
 const { watermarkImage, watermarkCodeSnippet } = require('../lib/watermark');
 const { STORAGE_ROOT } = require('../lib/paths');
+const { isAdmin } = require('../lib/permissions');
 
 const router = express.Router();
 const ASSET_TOKEN_TTL = parseInt(process.env.ASSET_TOKEN_TTL_SECONDS || '120', 10);
@@ -17,9 +18,30 @@ function logAccess(req, userId, assetId, action) {
   ).run(userId, assetId, action, req.ip, req.headers['user-agent'] || null);
 }
 
-// List available assets (metadata only — no file bytes here).
+// Admins/owner implicitly see and can request tokens for everything (they
+// manage the library). Plain viewers only get assets explicitly granted to
+// them via asset_grants — see routes/admin.js grants endpoints.
+function hasAccessToAsset(user, assetId) {
+  if (isAdmin(user)) return true;
+  const grant = db
+    .prepare('SELECT 1 FROM asset_grants WHERE user_id = ? AND asset_id = ?')
+    .get(user.id, assetId);
+  return !!grant;
+}
+
+// List available assets (metadata only — no file bytes here). Viewers only
+// see assets they've been granted; admins/owner see everything.
 router.get('/', requireAuth, requireAgreement, (req, res) => {
-  const rows = db.prepare('SELECT id, type, title, created_at FROM assets ORDER BY created_at DESC').all();
+  const rows = isAdmin(req.user)
+    ? db.prepare('SELECT id, type, title, created_at FROM assets ORDER BY created_at DESC').all()
+    : db
+        .prepare(
+          `SELECT a.id, a.type, a.title, a.created_at
+           FROM assets a JOIN asset_grants g ON g.asset_id = a.id
+           WHERE g.user_id = ?
+           ORDER BY a.created_at DESC`
+        )
+        .all(req.user.id);
   res.json({ assets: rows });
 });
 
@@ -29,6 +51,9 @@ router.get('/', requireAuth, requireAgreement, (req, res) => {
 router.post('/:id/token', requireAuth, requireAgreement, (req, res) => {
   const asset = db.prepare('SELECT id FROM assets WHERE id = ?').get(req.params.id);
   if (!asset) return res.status(404).json({ error: 'Asset not found' });
+  if (!hasAccessToAsset(req.user, asset.id)) {
+    return res.status(403).json({ error: 'You do not have access to this asset' });
+  }
 
   const token = issueAssetToken(req.user.id, asset.id, ASSET_TOKEN_TTL);
   logAccess(req, req.user.id, asset.id, 'token_issued');

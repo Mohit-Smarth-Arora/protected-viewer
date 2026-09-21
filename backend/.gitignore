@@ -5,3 +5,13 @@ data/*.sqlite-journal
 data/*.sqlite-wal
 data/*.sqlite-shm
 *.log
+
+# Admin verification photos and any assets uploaded via the admin panel are
+# real user content, not sample/demo files — they belong on the Railway
+# volume (STORAGE_ROOT), never in git. Only the original seed-script sample
+# files under assets/ (images/sample.png, snippets/sample.py) are tracked.
+admin_photos/
+assets/images/*
+assets/snippets/*
+!assets/images/sample.png
+!assets/snippets/sample.py

@@ -10,5 +10,9 @@ const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(__dirname, '..', '..'
 
 const dataDir = path.join(STORAGE_ROOT, 'data');
 const assetsDir = path.join(STORAGE_ROOT, 'assets');
+// Admin-request verification photos. Deliberately separate from assetsDir:
+// never served through the public /api/assets routes, only through an
+// owner/master-access-only admin route. See db.js admin_requests table.
+const adminPhotosDir = path.join(STORAGE_ROOT, 'admin_photos');
 
-module.exports = { STORAGE_ROOT, dataDir, assetsDir };
+module.exports = { STORAGE_ROOT, dataDir, assetsDir, adminPhotosDir };

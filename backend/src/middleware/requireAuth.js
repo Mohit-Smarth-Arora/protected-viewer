@@ -20,7 +20,9 @@ function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Invalid or expired session' });
   }
 
-  const user = db.prepare('SELECT id, email, display_name FROM users WHERE id = ?').get(payload.sub);
+  const user = db
+    .prepare('SELECT id, email, display_name, role, has_master_access FROM users WHERE id = ?')
+    .get(payload.sub);
   if (!user) {
     return res.status(401).json({ error: 'User no longer exists' });
   }

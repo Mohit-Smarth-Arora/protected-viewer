@@ -10,13 +10,23 @@ function escapeXml(str) {
     .replace(/'/g, '&apos;');
 }
 
+// Every watermark carries this ownership line beneath the per-view
+// email+timestamp label, on every asset type, per-request.
+const OWNERSHIP_LINE = 'Solely Owned by Mohit Smarth Arora';
+
 // Builds a repeating diagonal tiled watermark SVG covering the whole image.
 // Repeating (not a single corner mark) matters: a corner watermark is trivially
 // cropped out; a full tile survives cropping to any sub-region.
+//
+// `label` may be a single string or an array of lines — each line renders
+// as its own <tspan> stacked under the tile's rotation, so e.g. the viewer's
+// email+timestamp and the ownership line both appear in every tile.
 function buildWatermarkSvg(width, height, label) {
-  const safeLabel = escapeXml(label);
-  const tileW = 320;
-  const tileH = 160;
+  const lines = Array.isArray(label) ? label : [label];
+  const safeLines = lines.map(escapeXml);
+  const tileW = 340;
+  const tileH = 170;
+  const lineHeightPx = 22;
   const cols = Math.ceil(width / tileW) + 2;
   const rows = Math.ceil(height / tileH) + 2;
 
@@ -25,7 +35,10 @@ function buildWatermarkSvg(width, height, label) {
     for (let c = 0; c < cols; c++) {
       const x = c * tileW - tileW / 2;
       const y = r * tileH;
-      texts += `<text x="${x}" y="${y}" transform="rotate(-30 ${x} ${y})">${safeLabel}</text>`;
+      const tspans = safeLines
+        .map((line, i) => `<tspan x="${x}" dy="${i === 0 ? 0 : lineHeightPx}">${line}</tspan>`)
+        .join('');
+      texts += `<text x="${x}" y="${y}" transform="rotate(-30 ${x} ${y})">${tspans}</text>`;
     }
   }
 
@@ -45,16 +58,17 @@ function buildWatermarkSvg(width, height, label) {
   `;
 }
 
-// Renders `label` (e.g. "user@example.com • 2026-09-21T12:00:00Z • view#abc123")
-// as a tiled watermark composited onto the source image, server-side, before
-// any bytes leave the server. Returns a Buffer (PNG).
+// Renders `label` (e.g. "user@example.com • 2026-09-21T12:00:00Z") as a
+// tiled watermark composited onto the source image, server-side, before any
+// bytes leave the server. The ownership line is always appended as a second
+// line in every tile. Returns a Buffer (PNG).
 async function watermarkImage(sourcePath, label) {
   const image = sharp(sourcePath);
   const metadata = await image.metadata();
   const width = metadata.width || 1024;
   const height = metadata.height || 768;
 
-  const svg = buildWatermarkSvg(width, height, label);
+  const svg = buildWatermarkSvg(width, height, [label, OWNERSHIP_LINE]);
   const svgBuffer = Buffer.from(svg);
 
   return image
@@ -63,9 +77,21 @@ async function watermarkImage(sourcePath, label) {
     .toBuffer();
 }
 
+// Extracts just the <text>...</text> tile markup from buildWatermarkSvg's
+// output, so the code-snippet renderer can composite the same tiling logic
+// as a background layer beneath the code text, at a different opacity/size
+// canvas than watermarkImage uses. Keeps tile geometry in one place
+// (buildWatermarkSvg) rather than duplicating the tiling math here.
+function buildWatermarkTiles(width, height, label) {
+  const full = buildWatermarkSvg(width, height, label);
+  const match = full.match(/<style>[^]*<\/style>\s*([^]*)<\/svg>/);
+  return match ? match[1] : '';
+}
+
 // Renders a code snippet (plain text) as a watermarked image so raw text
 // never reaches the client. Uses SVG text layout — monospace, one <tspan>
-// per line — rasterized to PNG by sharp.
+// per line — rasterized to PNG by sharp. The ownership line is always
+// appended to the per-view label, same as watermarkImage.
 async function watermarkCodeSnippet(code, label, opts = {}) {
   const lines = code.split('\n');
   const fontSize = opts.fontSize || 16;
@@ -84,18 +110,16 @@ async function watermarkCodeSnippet(code, label, opts = {}) {
     })
     .join('');
 
-  const watermarkOverlay = buildWatermarkSvg(width, height, label)
-    .replace('<svg', '<svg') // reuse tiles, composited as a second layer below
-    .match(/<text[^]*?<\/text>/g) || [];
+  const watermarkTiles = buildWatermarkTiles(width, height, [label, OWNERSHIP_LINE]);
 
   const svg = `
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <rect width="100%" height="100%" fill="#1e1e1e"/>
       <style>
         .code { font-family: 'DejaVu Sans Mono', monospace; font-size: ${fontSize}px; fill: #d4d4d4; }
-        .wm { font-family: 'DejaVu Sans', sans-serif; font-size: 20px; fill: rgba(255,255,255,0.12); }
+        .wm text { font-family: 'DejaVu Sans', sans-serif; font-size: 20px; fill: rgba(255,255,255,0.12); stroke: none; }
       </style>
-      <g class="wm">${watermarkOverlay.join('')}</g>
+      <g class="wm">${watermarkTiles}</g>
       ${codeLines}
     </svg>
   `;
@@ -103,4 +127,4 @@ async function watermarkCodeSnippet(code, label, opts = {}) {
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
-module.exports = { watermarkImage, watermarkCodeSnippet };
+module.exports = { watermarkImage, watermarkCodeSnippet, OWNERSHIP_LINE };

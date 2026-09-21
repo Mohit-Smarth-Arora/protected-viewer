@@ -2,6 +2,9 @@ const express = require('express');
 const db = require('../lib/db');
 const { hashPassword, verifyPassword, issueSessionToken } = require('../lib/auth');
 const requireAuth = require('../middleware/requireAuth');
+const { uploadAdminPhoto } = require('../lib/uploads');
+const { STORAGE_ROOT } = require('../lib/paths');
+const path = require('path');
 
 const router = express.Router();
 
@@ -80,6 +83,60 @@ router.post('/agreement/accept', requireAuth, (req, res) => {
      ON CONFLICT(user_id) DO UPDATE SET version = excluded.version, accepted_at = datetime('now')`
   ).run(req.user.id, AGREEMENT_VERSION);
   res.json({ ok: true, agreementVersion: AGREEMENT_VERSION });
+});
+
+// Submits (or re-submits after a rejection) a request to become an admin.
+// Requires being logged in as a plain viewer first — this is an upgrade
+// request on an existing account, not a separate signup path. Approval
+// happens later via the admin-requests review routes (routes/admin.js).
+router.post('/admin-request', requireAuth, uploadAdminPhoto.single('photo'), (req, res) => {
+  if (req.user.role !== 'viewer') {
+    return res.status(400).json({ error: 'Only viewer accounts can request admin access' });
+  }
+
+  const { fullLegalName, phoneNumber, organization, reason } = req.body || {};
+
+  if (typeof fullLegalName !== 'string' || fullLegalName.trim().length === 0) {
+    return res.status(400).json({ error: 'Full legal name is required' });
+  }
+  if (typeof phoneNumber !== 'string' || phoneNumber.trim().length === 0) {
+    return res.status(400).json({ error: 'Phone number is required' });
+  }
+  if (typeof reason !== 'string' || reason.trim().length === 0) {
+    return res.status(400).json({ error: 'Reason for admin access is required' });
+  }
+  if (!req.file) {
+    return res.status(400).json({ error: 'A passport-size photo is required' });
+  }
+
+  const existingPending = db
+    .prepare("SELECT id FROM admin_requests WHERE user_id = ? AND status = 'pending'")
+    .get(req.user.id);
+  if (existingPending) {
+    return res.status(409).json({ error: 'You already have a pending admin request' });
+  }
+
+  const photoRelativePath = path.join(
+    'admin_photos',
+    path.relative(path.join(STORAGE_ROOT, 'admin_photos'), req.file.path)
+  );
+
+  const info = db
+    .prepare(
+      `INSERT INTO admin_requests
+        (user_id, full_legal_name, phone_number, organization, reason, photo_path)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      req.user.id,
+      fullLegalName.trim(),
+      phoneNumber.trim(),
+      organization ? organization.trim() : null,
+      reason.trim(),
+      photoRelativePath
+    );
+
+  res.status(201).json({ ok: true, requestId: info.lastInsertRowid, status: 'pending' });
 });
 
 module.exports = router;

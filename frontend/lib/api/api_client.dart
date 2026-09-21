@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 /// Thin wrapper around the backend HTTP API.
@@ -83,6 +84,132 @@ class ApiClient {
   /// success — there is no unwatermarked version this client can ever reach.
   Future<http.Response> fetchAssetContent(String assetId, String assetToken) {
     return http.get(_uri('/api/assets/$assetId/content?token=$assetToken'));
+  }
+
+  // ---- Admin request (viewer applying to become admin) -----------------
+
+  Future<ApiResult> submitAdminRequest({
+    required String fullLegalName,
+    required String phoneNumber,
+    String? organization,
+    required String reason,
+    required Uint8List photoBytes,
+    required String photoFilename,
+  }) async {
+    final request = http.MultipartRequest('POST', _uri('/api/auth/admin-request'))
+      ..headers.addAll({if (_sessionToken != null) 'Authorization': 'Bearer $_sessionToken'})
+      ..fields['fullLegalName'] = fullLegalName
+      ..fields['phoneNumber'] = phoneNumber
+      ..fields['reason'] = reason
+      ..files.add(http.MultipartFile.fromBytes('photo', photoBytes, filename: photoFilename));
+    if (organization != null && organization.isNotEmpty) {
+      request.fields['organization'] = organization;
+    }
+
+    final streamed = await request.send();
+    final res = await http.Response.fromStream(streamed);
+    return ApiResult.fromResponse(res);
+  }
+
+  // ---- Admin: reviewing requests / managing admins (master access) -----
+
+  Future<ApiResult> listAdminRequests({String status = 'pending'}) async {
+    final res = await http.get(
+      _uri('/api/admin/admin-requests?status=$status'),
+      headers: _authHeaders,
+    );
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<http.Response> fetchAdminRequestPhoto(int requestId) {
+    return http.get(_uri('/api/admin/admin-requests/$requestId/photo'), headers: _authHeaders);
+  }
+
+  Future<ApiResult> approveAdminRequest(int requestId, {required bool grantMasterAccess}) async {
+    final res = await http.post(
+      _uri('/api/admin/admin-requests/$requestId/approve'),
+      headers: _authHeaders,
+      body: jsonEncode({'grantMasterAccess': grantMasterAccess}),
+    );
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> rejectAdminRequest(int requestId) async {
+    final res = await http.post(
+      _uri('/api/admin/admin-requests/$requestId/reject'),
+      headers: _authHeaders,
+    );
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> listAdmins() async {
+    final res = await http.get(_uri('/api/admin/admins'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> setAdminMasterAccess(int userId, {required bool grant}) async {
+    final res = await http.post(
+      _uri('/api/admin/admins/$userId/master-access'),
+      headers: _authHeaders,
+      body: jsonEncode({'grant': grant}),
+    );
+    return ApiResult.fromResponse(res);
+  }
+
+  // ---- Admin: asset upload + grants (plain admin and up) ----------------
+
+  Future<ApiResult> listAdminAssets() async {
+    final res = await http.get(_uri('/api/admin/assets'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> uploadAsset({
+    required String type,
+    required String title,
+    required Uint8List fileBytes,
+    required String filename,
+  }) async {
+    final request = http.MultipartRequest('POST', _uri('/api/admin/assets'))
+      ..headers.addAll({if (_sessionToken != null) 'Authorization': 'Bearer $_sessionToken'})
+      ..fields['type'] = type
+      ..fields['title'] = title
+      ..files.add(http.MultipartFile.fromBytes('file', fileBytes, filename: filename));
+
+    final streamed = await request.send();
+    final res = await http.Response.fromStream(streamed);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> deleteAsset(String assetId) async {
+    final res = await http.delete(_uri('/api/admin/assets/$assetId'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> listViewers() async {
+    final res = await http.get(_uri('/api/admin/users'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> listAssetGrants(String assetId) async {
+    final res = await http.get(_uri('/api/admin/assets/$assetId/grants'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> grantAsset(String assetId, int userId) async {
+    final res = await http.post(
+      _uri('/api/admin/assets/$assetId/grants'),
+      headers: _authHeaders,
+      body: jsonEncode({'userId': userId}),
+    );
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> revokeAssetGrant(String assetId, int userId) async {
+    final res = await http.delete(
+      _uri('/api/admin/assets/$assetId/grants/$userId'),
+      headers: _authHeaders,
+    );
+    return ApiResult.fromResponse(res);
   }
 }
 
