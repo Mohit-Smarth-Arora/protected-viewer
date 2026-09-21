@@ -1,0 +1,9 @@
+DejaVu fonts (DejaVuSans.ttf, DejaVuSansMono.ttf)
+
+Bundled here so server-side watermark rendering (src/lib/watermark.js) does
+not depend on fonts being present on the host OS — this is what broke on
+Railway's minimal container (see git history around 2026-09-21).
+
+DejaVu fonts are based on Bitstream Vera and released under a permissive
+free license that explicitly allows redistribution and embedding, with or
+without modification. Full license text: https://dejavu-fonts.github.io/License.html

@@ -1,3 +1,4 @@
+require('./lib/fonts'); // must run before any 'sharp' require, see file for why
 const app = require('./app');
 const { bootstrapStorageIfEmpty } = require('./lib/bootstrap');
 
