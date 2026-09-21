@@ -1,6 +1,23 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
+
+/// http.MultipartFile.fromBytes doesn't reliably infer a content-type from
+/// the filename on its own (falls back to application/octet-stream, which
+/// the backend's fileFilter then rejects even for genuinely valid files —
+/// see git history for the admin-photo-upload bug this fixes). Setting
+/// MediaType explicitly avoids depending on that inference at all.
+MediaType? _mediaTypeForFilename(String filename) {
+  final ext = filename.toLowerCase().split('.').last;
+  return switch (ext) {
+    'jpg' || 'jpeg' => MediaType('image', 'jpeg'),
+    'png' => MediaType('image', 'png'),
+    'webp' => MediaType('image', 'webp'),
+    'py' => MediaType('text', 'plain'),
+    _ => null, // let http fall back to its own default rather than guess wrong
+  };
+}
 
 /// Thin wrapper around the backend HTTP API.
 ///
@@ -101,7 +118,12 @@ class ApiClient {
       ..fields['fullLegalName'] = fullLegalName
       ..fields['phoneNumber'] = phoneNumber
       ..fields['reason'] = reason
-      ..files.add(http.MultipartFile.fromBytes('photo', photoBytes, filename: photoFilename));
+      ..files.add(http.MultipartFile.fromBytes(
+        'photo',
+        photoBytes,
+        filename: photoFilename,
+        contentType: _mediaTypeForFilename(photoFilename),
+      ));
     if (organization != null && organization.isNotEmpty) {
       request.fields['organization'] = organization;
     }
@@ -173,7 +195,12 @@ class ApiClient {
       ..headers.addAll({if (_sessionToken != null) 'Authorization': 'Bearer $_sessionToken'})
       ..fields['type'] = type
       ..fields['title'] = title
-      ..files.add(http.MultipartFile.fromBytes('file', fileBytes, filename: filename));
+      ..files.add(http.MultipartFile.fromBytes(
+        'file',
+        fileBytes,
+        filename: filename,
+        contentType: _mediaTypeForFilename(filename),
+      ));
 
     final streamed = await request.send();
     final res = await http.Response.fromStream(streamed);

@@ -37,6 +37,10 @@ dependencies:
 
   # Backend API calls
   http: ^1.5.0
+  # Explicit multipart content-type for uploads (http's own inference falls
+  # back to application/octet-stream, which the backend's mimetype allowlist
+  # rejects even for valid files) — see api_client.dart _mediaTypeForFilename
+  http_parser: ^4.1.2
   # Simple app-wide state management (auth session, current view)
   provider: ^6.1.5
   # File selection for admin-request photo and asset uploads (cross-platform)
