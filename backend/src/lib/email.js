@@ -1,22 +1,22 @@
-const sgMail = require('@sendgrid/mail');
+const { Resend } = require('resend');
 
-const apiKey = process.env.SENDGRID_API_KEY;
-const fromEmail = process.env.SENDGRID_FROM_EMAIL;
+const apiKey = process.env.RESEND_API_KEY;
+const fromEmail = process.env.RESEND_FROM_EMAIL;
 const configured = !!(apiKey && fromEmail);
 
-if (configured) {
-  sgMail.setApiKey(apiKey);
-} else {
+const resend = configured ? new Resend(apiKey) : null;
+
+if (!configured) {
   console.warn(
-    'SENDGRID_API_KEY / SENDGRID_FROM_EMAIL not set — verification emails will be logged to the ' +
+    'RESEND_API_KEY / RESEND_FROM_EMAIL not set — verification emails will be logged to the ' +
       'console instead of actually sent. Set both env vars to enable real delivery.'
   );
 }
 
-// Sends a verification email, or logs the code to the console if SendGrid
+// Sends a verification email, or logs the code to the console if Resend
 // isn't configured (local dev default — lets registration/verification be
 // tested end to end without a real email account). Never throws on a
-// missing config; only throws if SendGrid itself rejects a real send, so
+// missing config; only throws if Resend itself rejects a real send, so
 // the caller can decide how to surface that to the registering user.
 async function sendVerificationEmail(toEmail, code) {
   if (!configured) {
@@ -24,13 +24,16 @@ async function sendVerificationEmail(toEmail, code) {
     return { delivered: false, reason: 'not_configured' };
   }
 
-  await sgMail.send({
+  const { error } = await resend.emails.send({
     to: toEmail,
     from: fromEmail,
     subject: 'Verify your email — Protected Viewer',
     text: `Your verification code is: ${code}\n\nThis code expires in 30 minutes.`,
     html: `<p>Your verification code is:</p><p style="font-size:28px;font-weight:bold;letter-spacing:4px;">${code}</p><p>This code expires in 30 minutes.</p>`,
   });
+  if (error) {
+    throw new Error(`Resend send failed: ${error.message || JSON.stringify(error)}`);
+  }
   return { delivered: true };
 }
 

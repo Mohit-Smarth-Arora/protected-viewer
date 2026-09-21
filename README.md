@@ -109,19 +109,19 @@ a master-access admin ("Referral codes" in the menu). A code is a short
 uppercase alphanumeric string (ambiguous characters like `0`/`O`, `1`/`I`
 excluded), reusable until deactivated, with a use counter.
 
-### Email delivery (SendGrid)
+### Email delivery (Resend)
 
-Verification codes are sent via SendGrid (`backend/src/lib/email.js`).
+Verification codes are sent via Resend (`backend/src/lib/email.js`).
 Configure with two env vars:
 ```
-SENDGRID_API_KEY=SG.xxxxx
-SENDGRID_FROM_EMAIL=you@yourdomain.com   # must be a verified sender in SendGrid
+RESEND_API_KEY=re_xxxxx
+RESEND_FROM_EMAIL=onboarding@resend.dev   # or a domain you've verified in Resend
 ```
 **If these are unset** (the local dev default), the module logs the code to
 the console instead of sending a real email (`[email:dev-mode] Verification
 code for x@example.com: 123456`) — lets the whole flow be tested without a
-real SendGrid account. SendGrid's free tier is 100 emails/day, no cost, no
-credit card required for that tier.
+real Resend account. Resend's free tier is 3,000 emails/month (100/day), no
+cost, no credit card required for that tier.
 
 ## Folders
 
