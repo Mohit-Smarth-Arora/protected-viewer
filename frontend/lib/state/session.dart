@@ -11,7 +11,20 @@ const _heartbeatInterval = Duration(seconds: 45);
 // `unknown` is reserved for when session restoration (e.g. "remember me")
 // is added — it would be the "checking stored token" transient state.
 // Not used yet since sessions are in-memory only (see class doc below).
-enum AuthStatus { unknown, signedOut, signedInNeedsAgreement, signedIn }
+//
+// Order a fresh viewer moves through: signedOut -> needsEmailVerification
+// -> (pendingApproval if no valid referral code was used) -> signedIn
+// (needsAgreement is checked once email+approval are settled). Admins/owner
+// skip needsEmailVerification/pendingApproval entirely — the backend's
+// requireActiveAccount middleware exempts them (see git history).
+enum AuthStatus {
+  unknown,
+  signedOut,
+  needsEmailVerification,
+  pendingApproval,
+  signedInNeedsAgreement,
+  signedIn,
+}
 
 /// Holds the current session (auth token, user info, agreement status) and
 /// notifies listeners on change. Session token lives only in memory for now
@@ -41,6 +54,12 @@ class Session extends ChangeNotifier {
   // (which only stores meaningfully for role='admin' server-side).
   bool get effectiveMasterAccess => role == 'owner' || hasMasterAccess;
 
+  // Stashed from registration's response so the verification screen can
+  // pass it back to /verify-email without asking the user to retype it.
+  // Purely a client-side convenience — the server independently
+  // re-validates the code at verification time regardless.
+  String? _pendingReferralCode;
+
   Future<void> login(String email, String password) async {
     _lastError = null;
     final res = await api.login(email: email, password: password);
@@ -55,15 +74,16 @@ class Session extends ChangeNotifier {
     userId = user['id'] as int;
     userEmail = user['email'] as String;
     userDisplayName = user['displayName'] as String;
-    await _refreshAgreementStatus();
+    await _refreshStatus();
   }
 
-  Future<void> register(String email, String password, String displayName) async {
+  Future<void> register(String email, String password, String displayName, {String? referralCode}) async {
     _lastError = null;
     final res = await api.register(
       email: email,
       password: password,
       displayName: displayName,
+      referralCode: referralCode,
     );
     if (!res.ok) {
       _lastError = res.error ?? 'Registration failed';
@@ -72,14 +92,15 @@ class Session extends ChangeNotifier {
     }
     final token = res.body['token'] as String;
     final user = res.body['user'] as Map<String, dynamic>;
+    _pendingReferralCode = res.body['pendingReferralCode'] as String?;
     api.setSessionToken(token);
     userId = user['id'] as int;
     userEmail = user['email'] as String;
     userDisplayName = user['displayName'] as String;
-    await _refreshAgreementStatus();
+    await _refreshStatus();
   }
 
-  Future<void> _refreshAgreementStatus() async {
+  Future<void> _refreshStatus() async {
     final meRes = await api.me();
     if (!meRes.ok) {
       status = AuthStatus.signedOut;
@@ -89,14 +110,43 @@ class Session extends ChangeNotifier {
     final userInfo = meRes.body['user'] as Map<String, dynamic>;
     role = userInfo['role'] as String? ?? 'viewer';
     hasMasterAccess = userInfo['has_master_access'] == 1 || userInfo['has_master_access'] == true;
-
+    final emailVerified = userInfo['email_verified'] == 1 || userInfo['email_verified'] == true;
+    final signupStatus = userInfo['signup_status'] as String? ?? 'active';
     final accepted = meRes.body['agreementAccepted'] == true;
-    status = accepted ? AuthStatus.signedIn : AuthStatus.signedInNeedsAgreement;
+
+    // Admins/owner skip the verification/approval gate entirely (mirrors
+    // the backend's requireActiveAccount exemption).
+    final isAdminOrOwner = role == 'admin' || role == 'owner';
+
+    if (!isAdminOrOwner && !emailVerified) {
+      status = AuthStatus.needsEmailVerification;
+    } else if (!isAdminOrOwner && signupStatus != 'active') {
+      status = AuthStatus.pendingApproval;
+    } else if (!accepted) {
+      status = AuthStatus.signedInNeedsAgreement;
+    } else {
+      status = AuthStatus.signedIn;
+    }
+
     if (status == AuthStatus.signedIn) {
       _startHeartbeat();
     }
     notifyListeners();
   }
+
+  Future<void> verifyEmail(String code) async {
+    _lastError = null;
+    final res = await api.verifyEmail(code: code, referralCode: _pendingReferralCode);
+    if (!res.ok) {
+      _lastError = res.error ?? 'Verification failed';
+      notifyListeners();
+      return;
+    }
+    _pendingReferralCode = null;
+    await _refreshStatus();
+  }
+
+  Future<ApiResult> resendVerification() => api.resendVerification();
 
   void _startHeartbeat() {
     if (_heartbeatTimer != null) return; // already running
@@ -111,7 +161,7 @@ class Session extends ChangeNotifier {
 
   /// Re-pulls /me without changing auth flow state — used after actions
   /// that might change role/master-access (e.g. own admin request outcome).
-  Future<void> refreshUserInfo() => _refreshAgreementStatus();
+  Future<void> refreshUserInfo() => _refreshStatus();
 
   Future<void> acceptAgreement() async {
     final res = await api.acceptAgreement();
@@ -132,6 +182,7 @@ class Session extends ChangeNotifier {
     userDisplayName = null;
     role = 'viewer';
     hasMasterAccess = false;
+    _pendingReferralCode = null;
     status = AuthStatus.signedOut;
     notifyListeners();
   }

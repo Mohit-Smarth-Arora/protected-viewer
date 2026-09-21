@@ -4,22 +4,41 @@ const { hashPassword, verifyPassword, issueSessionToken } = require('../lib/auth
 const requireAuth = require('../middleware/requireAuth');
 const { uploadAdminPhoto } = require('../lib/uploads');
 const { STORAGE_ROOT } = require('../lib/paths');
+const { sendVerificationEmail } = require('../lib/email');
+const { generateVerificationCode } = require('../lib/codes');
 const path = require('path');
 
 const router = express.Router();
 
 const AGREEMENT_VERSION = '2026-09-21';
+const VERIFICATION_CODE_TTL_MINUTES = 30;
 
 function isValidEmail(email) {
   return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-// NOTE: open self-registration is fine for development. Before sharing this
-// with real external viewers, replace this with invite-only account creation
-// (you create accounts for the specific people you're sharing with) — open
-// signup defeats the point of "not full access to just anyone."
+function issueAndSendVerificationCode(userId, email) {
+  const code = generateVerificationCode();
+  db.prepare(
+    `INSERT INTO email_verification_codes (user_id, code, expires_at)
+     VALUES (?, ?, datetime('now', '+${VERIFICATION_CODE_TTL_MINUTES} minutes'))`
+  ).run(userId, code);
+  // Fire-and-forget from the caller's perspective — email delivery
+  // failures shouldn't fail registration itself (see lib/email.js: logs
+  // the code to console when SendGrid isn't configured, so local dev and
+  // testing work without a real provider).
+  return sendVerificationEmail(email, code).catch((err) => {
+    console.error('Failed to send verification email:', err);
+  });
+}
+
+// Registration always creates the account with email_verified=0. A valid,
+// active referral code is checked and recorded now (not consumed until
+// verification succeeds, so an abandoned/unverified registration doesn't
+// burn anyone's referral usage count) — see verify-email below for how it
+// determines signup_status.
 router.post('/register', async (req, res) => {
-  const { email, password, displayName } = req.body || {};
+  const { email, password, displayName, referralCode } = req.body || {};
 
   if (!isValidEmail(email)) {
     return res.status(400).json({ error: 'Valid email is required' });
@@ -29,6 +48,18 @@ router.post('/register', async (req, res) => {
   }
   if (typeof displayName !== 'string' || displayName.trim().length === 0) {
     return res.status(400).json({ error: 'Display name is required' });
+  }
+
+  let validReferralCode = null;
+  if (referralCode && typeof referralCode === 'string' && referralCode.trim().length > 0) {
+    const normalizedCode = referralCode.trim().toUpperCase();
+    const row = db
+      .prepare('SELECT code FROM referral_codes WHERE code = ? AND is_active = 1')
+      .get(normalizedCode);
+    if (!row) {
+      return res.status(400).json({ error: 'Referral code is invalid or no longer active' });
+    }
+    validReferralCode = normalizedCode;
   }
 
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase());
@@ -41,10 +72,81 @@ router.post('/register', async (req, res) => {
     .prepare('INSERT INTO users (email, password_hash, display_name) VALUES (?, ?, ?)')
     .run(email.toLowerCase(), passwordHash, displayName.trim());
 
-  const user = { id: info.lastInsertRowid, email: email.toLowerCase(), display_name: displayName.trim() };
+  const userId = info.lastInsertRowid;
+  await issueAndSendVerificationCode(userId, email.toLowerCase());
+
+  const user = { id: userId, email: email.toLowerCase(), display_name: displayName.trim() };
   const token = issueSessionToken(user);
 
-  res.status(201).json({ token, user: { id: user.id, email: user.email, displayName: user.display_name } });
+  res.status(201).json({
+    token,
+    user: { id: user.id, email: user.email, displayName: user.display_name },
+    // Client stashes this locally just to pass it back to /verify-email —
+    // the server is the source of truth on whether it's actually valid;
+    // this only avoids asking the user to retype the code they entered.
+    pendingReferralCode: validReferralCode,
+  });
+});
+
+// Verifies the 6-digit code. On success: if a valid referral code was
+// supplied at registration, the account goes straight to signup_status
+// 'active' and the code's uses_count increments. Otherwise a
+// signup_requests row is created and the account stays 'pending_approval'
+// until any admin approves it (see routes/admin.js /signup-requests).
+router.post('/verify-email', requireAuth, (req, res) => {
+  const { code, referralCode } = req.body || {};
+  if (typeof code !== 'string' || code.trim().length === 0) {
+    return res.status(400).json({ error: 'Verification code is required' });
+  }
+
+  if (req.user.email_verified) {
+    return res.status(400).json({ error: 'Email is already verified' });
+  }
+
+  const codeRow = db
+    .prepare(
+      `SELECT * FROM email_verification_codes
+       WHERE user_id = ? AND code = ? AND used_at IS NULL AND expires_at > datetime('now')
+       ORDER BY id DESC LIMIT 1`
+    )
+    .get(req.user.id, code.trim());
+
+  if (!codeRow) {
+    return res.status(400).json({ error: 'Invalid or expired verification code' });
+  }
+
+  db.prepare('UPDATE email_verification_codes SET used_at = datetime(\'now\') WHERE id = ?').run(codeRow.id);
+
+  let referralApplied = false;
+  if (referralCode && typeof referralCode === 'string' && referralCode.trim().length > 0) {
+    const normalizedCode = referralCode.trim().toUpperCase();
+    const referral = db
+      .prepare('SELECT code FROM referral_codes WHERE code = ? AND is_active = 1')
+      .get(normalizedCode);
+    if (referral) {
+      db.prepare('UPDATE referral_codes SET uses_count = uses_count + 1 WHERE code = ?').run(normalizedCode);
+      referralApplied = true;
+    }
+  }
+
+  if (referralApplied) {
+    db.prepare("UPDATE users SET email_verified = 1, signup_status = 'active' WHERE id = ?").run(req.user.id);
+  } else {
+    db.prepare("UPDATE users SET email_verified = 1, signup_status = 'pending_approval' WHERE id = ?").run(
+      req.user.id
+    );
+    db.prepare('INSERT INTO signup_requests (user_id) VALUES (?)').run(req.user.id);
+  }
+
+  res.json({ ok: true, signupStatus: referralApplied ? 'active' : 'pending_approval' });
+});
+
+router.post('/resend-verification', requireAuth, async (req, res) => {
+  if (req.user.email_verified) {
+    return res.status(400).json({ error: 'Email is already verified' });
+  }
+  await issueAndSendVerificationCode(req.user.id, req.user.email);
+  res.json({ ok: true });
 });
 
 router.post('/login', async (req, res) => {

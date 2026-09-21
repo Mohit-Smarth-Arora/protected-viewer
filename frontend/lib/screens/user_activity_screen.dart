@@ -42,11 +42,30 @@ class _AccountsTab extends StatefulWidget {
 class _AccountsTabState extends State<_AccountsTab> {
   List<Map<String, dynamic>>? _accounts;
   String? _error;
+  final _searchController = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     _load();
+    _searchController.addListener(() => setState(() => _query = _searchController.text.trim().toLowerCase()));
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<Map<String, dynamic>> get _filteredAccounts {
+    if (_accounts == null) return [];
+    if (_query.isEmpty) return _accounts!;
+    return _accounts!
+        .where((a) =>
+            (a['display_name'] as String).toLowerCase().contains(_query) ||
+            (a['email'] as String).toLowerCase().contains(_query))
+        .toList();
   }
 
   Future<void> _load() async {
@@ -114,32 +133,53 @@ class _AccountsTabState extends State<_AccountsTab> {
     if (_accounts == null) return const Center(child: CircularProgressIndicator());
     if (_accounts!.isEmpty) return const Center(child: Text('No accounts.'));
 
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView.separated(
-        itemCount: _accounts!.length,
-        separatorBuilder: (_, _) => const Divider(height: 1),
-        itemBuilder: (context, i) {
-          final a = _accounts![i];
-          final role = a['role'] as String;
-          return ListTile(
-            leading: Icon(switch (role) {
-              'owner' => Icons.workspace_premium,
-              'admin' => Icons.admin_panel_settings_outlined,
-              _ => Icons.person_outline,
-            }),
-            title: Text(a['display_name'] as String),
-            subtitle: Text('${a['email']} • joined ${a['created_at']}'),
-            trailing: role == 'viewer'
-                ? IconButton(
-                    icon: const Icon(Icons.chat_bubble_outline),
-                    tooltip: 'Message',
-                    onPressed: () => _messageViewer(context, a),
-                  )
-                : Chip(label: Text(role)),
-          );
-        },
-      ),
+    final filtered = _filteredAccounts;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: TextField(
+            controller: _searchController,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search),
+              hintText: 'Search by name or email',
+              isDense: true,
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: filtered.isEmpty
+                ? ListView(children: const [SizedBox(height: 40), Center(child: Text('No matches.'))])
+                : ListView.separated(
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, i) {
+                      final a = filtered[i];
+                      final role = a['role'] as String;
+                      return ListTile(
+                        leading: Icon(switch (role) {
+                          'owner' => Icons.workspace_premium,
+                          'admin' => Icons.admin_panel_settings_outlined,
+                          _ => Icons.person_outline,
+                        }),
+                        title: Text(a['display_name'] as String),
+                        subtitle: Text('${a['email']} • joined ${a['created_at']}'),
+                        trailing: role == 'viewer'
+                            ? IconButton(
+                                icon: const Icon(Icons.chat_bubble_outline),
+                                tooltip: 'Message',
+                                onPressed: () => _messageViewer(context, a),
+                              )
+                            : Chip(label: Text(role)),
+                      );
+                    },
+                  ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -154,11 +194,20 @@ class _LoginHistoryTab extends StatefulWidget {
 class _LoginHistoryTabState extends State<_LoginHistoryTab> {
   List<Map<String, dynamic>>? _logins;
   String? _error;
+  final _searchController = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     _load();
+    _searchController.addListener(() => setState(() => _query = _searchController.text.trim().toLowerCase()));
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -175,31 +224,62 @@ class _LoginHistoryTabState extends State<_LoginHistoryTab> {
     });
   }
 
+  List<Map<String, dynamic>> get _filteredLogins {
+    if (_logins == null) return [];
+    if (_query.isEmpty) return _logins!;
+    return _logins!
+        .where((l) =>
+            (l['display_name'] as String).toLowerCase().contains(_query) ||
+            (l['email'] as String).toLowerCase().contains(_query))
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_error != null) return Center(child: Text(_error!));
     if (_logins == null) return const Center(child: CircularProgressIndicator());
     if (_logins!.isEmpty) return const Center(child: Text('No sign-ins recorded yet.'));
 
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView.separated(
-        itemCount: _logins!.length,
-        separatorBuilder: (_, _) => const Divider(height: 1),
-        itemBuilder: (context, i) {
-          final l = _logins![i];
-          return ListTile(
-            leading: const Icon(Icons.login),
-            title: Text(l['display_name'] as String),
-            subtitle: Text('${l['email']} • ${l['ip'] ?? 'unknown IP'}'),
-            trailing: Text(
-              (l['created_at'] as String).replaceFirst(' ', '\n'),
-              textAlign: TextAlign.end,
-              style: Theme.of(context).textTheme.bodySmall,
+    final filtered = _filteredLogins;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: TextField(
+            controller: _searchController,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search),
+              hintText: 'Search by name or email',
+              isDense: true,
+              border: OutlineInputBorder(),
             ),
-          );
-        },
-      ),
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: filtered.isEmpty
+                ? ListView(children: const [SizedBox(height: 40), Center(child: Text('No matches.'))])
+                : ListView.separated(
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, i) {
+                      final l = filtered[i];
+                      return ListTile(
+                        leading: const Icon(Icons.login),
+                        title: Text(l['display_name'] as String),
+                        subtitle: Text('${l['email']} • ${l['ip'] ?? 'unknown IP'}'),
+                        trailing: Text(
+                          (l['created_at'] as String).replaceFirst(' ', '\n'),
+                          textAlign: TextAlign.end,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -13,6 +13,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
+  final _referralController = TextEditingController();
 
   bool _isRegisterMode = false;
   bool _isSubmitting = false;
@@ -22,6 +23,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _nameController.dispose();
+    _referralController.dispose();
     super.dispose();
   }
 
@@ -33,6 +35,7 @@ class _LoginScreenState extends State<LoginScreen> {
         _emailController.text.trim(),
         _passwordController.text,
         _nameController.text.trim(),
+        referralCode: _referralController.text.trim().isEmpty ? null : _referralController.text.trim(),
       );
     } else {
       await session.login(_emailController.text.trim(), _passwordController.text);
@@ -87,6 +90,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   obscureText: true,
                   onSubmitted: (_) => _submit(),
                 ),
+                if (_isRegisterMode) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _referralController,
+                    decoration: const InputDecoration(
+                      labelText: 'Referral code (optional)',
+                      helperText: 'Skips admin approval if valid. Leave blank to request approval instead.',
+                    ),
+                    textCapitalization: TextCapitalization.characters,
+                  ),
+                ],
                 const SizedBox(height: 20),
                 if (session.lastError != null) ...[
                   Text(

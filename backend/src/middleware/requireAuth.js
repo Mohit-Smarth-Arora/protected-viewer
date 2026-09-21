@@ -21,7 +21,9 @@ function requireAuth(req, res, next) {
   }
 
   const user = db
-    .prepare('SELECT id, email, display_name, role, has_master_access FROM users WHERE id = ?')
+    .prepare(
+      'SELECT id, email, display_name, role, has_master_access, email_verified, signup_status FROM users WHERE id = ?'
+    )
     .get(payload.sub);
   if (!user) {
     return res.status(401).json({ error: 'User no longer exists' });

@@ -4,6 +4,7 @@ const path = require('path');
 const db = require('../lib/db');
 const requireAuth = require('../middleware/requireAuth');
 const requireAgreement = require('../middleware/requireAgreement');
+const requireActiveAccount = require('../middleware/requireActiveAccount');
 const { issueAssetToken, verifyAssetToken } = require('../lib/auth');
 const { watermarkImage, watermarkCodeSnippet } = require('../lib/watermark');
 const { STORAGE_ROOT } = require('../lib/paths');
@@ -34,7 +35,7 @@ function hasAccessToAsset(user, asset) {
 // directly granted, an ancestor is granted, OR it contains (transitively)
 // something granted — so browsing down to a granted subfolder is possible
 // without granting every ancestor explicitly.
-router.get('/', requireAuth, requireAgreement, (req, res) => {
+router.get('/', requireAuth, requireActiveAccount, requireAgreement, (req, res) => {
   const folderId = req.query.folderId || null;
 
   if (isAdmin(req.user)) {
@@ -79,7 +80,7 @@ function folderContainsAnyAccessible(userId, folderId) {
 // Step 1: client asks for permission to view a specific asset. Server issues
 // a short-lived, single-asset-scoped token. This is the "signed URL" pattern
 // — the token can't be reused for a different asset and expires quickly.
-router.post('/:id/token', requireAuth, requireAgreement, (req, res) => {
+router.post('/:id/token', requireAuth, requireActiveAccount, requireAgreement, (req, res) => {
   const asset = db.prepare('SELECT id, title, folder_id FROM assets WHERE id = ?').get(req.params.id);
   if (!asset) return res.status(404).json({ error: 'Asset not found' });
   if (!hasAccessToAsset(req.user, asset)) {

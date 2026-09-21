@@ -4,6 +4,8 @@ import 'state/session.dart';
 import 'screens/login_screen.dart';
 import 'screens/agreement_screen.dart';
 import 'screens/asset_list_screen.dart';
+import 'screens/email_verification_screen.dart';
+import 'screens/pending_approval_screen.dart';
 
 class ProtectedViewerApp extends StatelessWidget {
   const ProtectedViewerApp({super.key});
@@ -34,6 +36,8 @@ class _RootRouter extends StatelessWidget {
 
     return switch (session.status) {
       AuthStatus.unknown || AuthStatus.signedOut => const LoginScreen(),
+      AuthStatus.needsEmailVerification => const EmailVerificationScreen(),
+      AuthStatus.pendingApproval => const PendingApprovalScreen(),
       AuthStatus.signedInNeedsAgreement => const AgreementScreen(),
       AuthStatus.signedIn => const AssetListScreen(),
     };

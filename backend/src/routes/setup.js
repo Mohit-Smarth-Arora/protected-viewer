@@ -30,8 +30,13 @@ router.post('/owner', async (req, res) => {
 
   const existing = db.prepare('SELECT id, role FROM users WHERE email = ?').get(email.toLowerCase());
 
+  // email_verified/signup_status set explicitly: calling this endpoint
+  // with the correct SETUP_SECRET IS the trusted out-of-band verification
+  // (same reasoning as scripts/seed_owner.js).
   if (existing) {
-    db.prepare("UPDATE users SET role = 'owner' WHERE id = ?").run(existing.id);
+    db.prepare(
+      "UPDATE users SET role = 'owner', email_verified = 1, signup_status = 'active' WHERE id = ?"
+    ).run(existing.id);
     return res.json({ ok: true, action: 'promoted', userId: existing.id });
   }
 
@@ -41,7 +46,9 @@ router.post('/owner', async (req, res) => {
 
   const passwordHash = await hashPassword(password);
   const info = db
-    .prepare("INSERT INTO users (email, password_hash, display_name, role) VALUES (?, ?, ?, 'owner')")
+    .prepare(
+      "INSERT INTO users (email, password_hash, display_name, role, email_verified, signup_status) VALUES (?, ?, ?, 'owner', 1, 'active')"
+    )
     .run(email.toLowerCase(), passwordHash, displayName);
 
   res.json({ ok: true, action: 'created', userId: info.lastInsertRowid });

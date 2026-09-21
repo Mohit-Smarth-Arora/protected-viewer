@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../lib/db');
 const requireAuth = require('../middleware/requireAuth');
+const requireActiveAccount = require('../middleware/requireActiveAccount');
 const { isAdmin } = require('../lib/permissions');
 
 const router = express.Router();
@@ -9,7 +10,7 @@ router.use(requireAuth);
 // A viewer's own request(s) to open a chat. Requires no request body
 // beyond an optional message — admin_id is optional (NULL = "any admin",
 // shown to all admins in their pending-requests view).
-router.post('/requests', (req, res) => {
+router.post('/requests', requireActiveAccount, (req, res) => {
   if (isAdmin(req.user)) {
     return res.status(400).json({ error: 'Admins can message viewers directly — no request needed' });
   }
@@ -113,7 +114,7 @@ router.post('/direct/:viewerId', (req, res) => {
 // Lists threads for the current user: a viewer sees their (usually one)
 // thread per admin they've messaged with; an admin sees all their viewer
 // threads.
-router.get('/threads', (req, res) => {
+router.get('/threads', requireActiveAccount, (req, res) => {
   const rows = isAdmin(req.user)
     ? db
         .prepare(
@@ -138,7 +139,7 @@ function userIsInThread(userId, thread) {
   return thread.viewer_id === userId || thread.admin_id === userId;
 }
 
-router.get('/threads/:id/messages', (req, res) => {
+router.get('/threads/:id/messages', requireActiveAccount, (req, res) => {
   const thread = db.prepare('SELECT * FROM chat_threads WHERE id = ?').get(req.params.id);
   if (!thread) return res.status(404).json({ error: 'Thread not found' });
   if (!userIsInThread(req.user.id, thread)) {
@@ -151,7 +152,7 @@ router.get('/threads/:id/messages', (req, res) => {
   res.json({ messages });
 });
 
-router.post('/threads/:id/messages', (req, res) => {
+router.post('/threads/:id/messages', requireActiveAccount, (req, res) => {
   const thread = db.prepare('SELECT * FROM chat_threads WHERE id = ?').get(req.params.id);
   if (!thread) return res.status(404).json({ error: 'Thread not found' });
   if (!userIsInThread(req.user.id, thread)) {

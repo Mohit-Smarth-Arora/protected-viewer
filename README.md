@@ -31,8 +31,11 @@ Phases:
 - **Phase 3.6 (done): folders, messaging, user activity** — Google-Drive-style
   folders with cascading access grants, an admin/viewer chat system, and an
   admin view of accounts/sign-ins/who's online. See below.
-- **Next**: tighten CORS to the real Pages origin, invite-only viewer
-  signup, video pipeline.
+- **Phase 3.7 (done): mandatory email verification + referral/approval gate**
+  — every viewer must verify their email; registering with a valid referral
+  code skips admin approval, otherwise the account waits for any admin to
+  approve it. See below.
+- **Next**: tighten CORS to the real Pages origin, video pipeline.
 
 ## Roles
 
@@ -78,6 +81,47 @@ curl -X POST https://your-backend-url/api/setup/owner \
 ```
 Unset `SETUP_SECRET` afterward — the route 404s (fully inert) whenever
 `SETUP_SECRET` isn't set, so leaving it unset is the safe default.
+
+## Viewer signup: email verification + referral/approval
+
+Every new account goes through this sequence:
+
+1. **Register** (email, password, display name, optional referral code).
+   Account is created immediately but can't do anything yet.
+2. **Verify email**: a 6-digit code is emailed (see "Email delivery"
+   below). The app blocks on this screen until the correct code is entered.
+3. **Branch on referral code**:
+   - **Valid, active referral code supplied** → account goes straight to
+     `signup_status = 'active'`. Done, full viewer access immediately.
+   - **No code, or an invalid/inactive one at registration** (registration
+     itself rejects an invalid code outright) — account becomes
+     `signup_status = 'pending_approval'` and a `signup_requests` row is
+     created. The viewer sees a "waiting for approval" screen. **Any**
+     admin (not master-access-gated — lower stakes than admin_requests)
+     can approve or reject from "Signup requests".
+
+Admins/owner are exempt from this whole gate (`requireActiveAccount`
+middleware) — their accounts either predate this feature or came through
+the admin-approval path already.
+
+**Referral codes** are created/deactivated/reactivated only by the owner or
+a master-access admin ("Referral codes" in the menu). A code is a short
+uppercase alphanumeric string (ambiguous characters like `0`/`O`, `1`/`I`
+excluded), reusable until deactivated, with a use counter.
+
+### Email delivery (SendGrid)
+
+Verification codes are sent via SendGrid (`backend/src/lib/email.js`).
+Configure with two env vars:
+```
+SENDGRID_API_KEY=SG.xxxxx
+SENDGRID_FROM_EMAIL=you@yourdomain.com   # must be a verified sender in SendGrid
+```
+**If these are unset** (the local dev default), the module logs the code to
+the console instead of sending a real email (`[email:dev-mode] Verification
+code for x@example.com: 123456`) — lets the whole flow be tested without a
+real SendGrid account. SendGrid's free tier is 100 emails/day, no cost, no
+credit card required for that tier.
 
 ## Folders
 

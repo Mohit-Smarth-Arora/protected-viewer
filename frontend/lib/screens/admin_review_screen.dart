@@ -39,11 +39,31 @@ class AdminReviewScreen extends StatefulWidget {
 class _AdminReviewScreenState extends State<AdminReviewScreen> {
   List<AdminRequestSummary>? _requests;
   String? _error;
+  final _searchController = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     _load();
+    _searchController.addListener(() => setState(() => _query = _searchController.text.trim().toLowerCase()));
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<AdminRequestSummary> get _filteredRequests {
+    if (_requests == null) return [];
+    if (_query.isEmpty) return _requests!;
+    return _requests!
+        .where((r) =>
+            r.fullLegalName.toLowerCase().contains(_query) ||
+            r.email.toLowerCase().contains(_query) ||
+            r.displayName.toLowerCase().contains(_query))
+        .toList();
   }
 
   Future<void> _load() async {
@@ -127,7 +147,24 @@ class _AdminReviewScreenState extends State<AdminReviewScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Pending admin requests')),
-      body: RefreshIndicator(onRefresh: _load, child: _buildBody()),
+      body: Column(
+        children: [
+          if ((_requests?.length ?? 0) > 5)
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: TextField(
+                controller: _searchController,
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search),
+                  hintText: 'Search by name or email',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ),
+          Expanded(child: RefreshIndicator(onRefresh: _load, child: _buildBody())),
+        ],
+      ),
     );
   }
 
@@ -148,11 +185,15 @@ class _AdminReviewScreenState extends State<AdminReviewScreen> {
         ],
       );
     }
+    final filtered = _filteredRequests;
+    if (filtered.isEmpty) {
+      return ListView(children: const [SizedBox(height: 60), Center(child: Text('No matches.'))]);
+    }
     return ListView.builder(
       padding: const EdgeInsets.all(12),
-      itemCount: _requests!.length,
+      itemCount: filtered.length,
       itemBuilder: (context, i) {
-        final r = _requests![i];
+        final r = filtered[i];
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
           child: Padding(

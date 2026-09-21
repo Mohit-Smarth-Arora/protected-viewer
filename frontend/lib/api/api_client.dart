@@ -45,6 +45,7 @@ class ApiClient {
     required String email,
     required String password,
     required String displayName,
+    String? referralCode,
   }) async {
     final res = await http.post(
       _uri('/api/auth/register'),
@@ -53,8 +54,23 @@ class ApiClient {
         'email': email,
         'password': password,
         'displayName': displayName,
+        'referralCode': ?referralCode,
       }),
     );
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> verifyEmail({required String code, String? referralCode}) async {
+    final res = await http.post(
+      _uri('/api/auth/verify-email'),
+      headers: _authHeaders,
+      body: jsonEncode({'code': code, 'referralCode': ?referralCode}),
+    );
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> resendVerification() async {
+    final res = await http.post(_uri('/api/auth/resend-verification'), headers: _authHeaders);
     return ApiResult.fromResponse(res);
   }
 
@@ -188,6 +204,45 @@ class ApiClient {
       headers: _authHeaders,
       body: jsonEncode({'grant': grant}),
     );
+    return ApiResult.fromResponse(res);
+  }
+
+  // ---- Referral codes (master access only) -------------------------------
+
+  Future<ApiResult> listReferralCodes() async {
+    final res = await http.get(_uri('/api/admin/referral-codes'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> createReferralCode() async {
+    final res = await http.post(_uri('/api/admin/referral-codes'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> deactivateReferralCode(String code) async {
+    final res = await http.post(_uri('/api/admin/referral-codes/$code/deactivate'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> reactivateReferralCode(String code) async {
+    final res = await http.post(_uri('/api/admin/referral-codes/$code/reactivate'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  // ---- Signup requests (plain admin and up) ------------------------------
+
+  Future<ApiResult> listSignupRequests({String status = 'pending'}) async {
+    final res = await http.get(_uri('/api/admin/signup-requests?status=$status'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> approveSignupRequest(int requestId) async {
+    final res = await http.post(_uri('/api/admin/signup-requests/$requestId/approve'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> rejectSignupRequest(int requestId) async {
+    final res = await http.post(_uri('/api/admin/signup-requests/$requestId/reject'), headers: _authHeaders);
     return ApiResult.fromResponse(res);
   }
 

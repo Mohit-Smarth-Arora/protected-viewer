@@ -17,8 +17,15 @@ async function main() {
 
   const existing = db.prepare('SELECT id, role FROM users WHERE email = ?').get(email.toLowerCase());
 
+  // email_verified/signup_status are set explicitly here (not left to the
+  // email-verification flow) because running this script IS the trusted,
+  // out-of-band verification — you (the operator) are asserting this
+  // account is legitimate directly, the same way SETUP_SECRET does for the
+  // HTTP owner-bootstrap path.
   if (existing) {
-    db.prepare("UPDATE users SET role = 'owner' WHERE id = ?").run(existing.id);
+    db.prepare(
+      "UPDATE users SET role = 'owner', email_verified = 1, signup_status = 'active' WHERE id = ?"
+    ).run(existing.id);
     console.log(`Existing account ${email} (id=${existing.id}) promoted to owner.`);
     return;
   }
@@ -30,7 +37,9 @@ async function main() {
 
   const passwordHash = await hashPassword(password);
   const info = db
-    .prepare("INSERT INTO users (email, password_hash, display_name, role) VALUES (?, ?, ?, 'owner')")
+    .prepare(
+      "INSERT INTO users (email, password_hash, display_name, role, email_verified, signup_status) VALUES (?, ?, ?, 'owner', 1, 'active')"
+    )
     .run(email.toLowerCase(), passwordHash, displayName);
   console.log(`Created owner account ${email} (id=${info.lastInsertRowid}).`);
 }

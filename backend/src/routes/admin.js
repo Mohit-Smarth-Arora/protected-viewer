@@ -10,6 +10,7 @@ const { uploadAssetToMemory } = require('../lib/uploads');
 const { assetsDir, STORAGE_ROOT } = require('../lib/paths');
 const { hasMasterAccess } = require('../lib/permissions');
 const { folderSubtreeIds } = require('../lib/folders');
+const { generateReferralCode } = require('../lib/codes');
 
 const router = express.Router();
 
@@ -96,6 +97,82 @@ router.post('/admins/:id/master-access', requireMasterAccess, (req, res) => {
   const grant = req.body?.grant === true;
   db.prepare('UPDATE users SET has_master_access = ? WHERE id = ?').run(grant ? 1 : 0, targetId);
   res.json({ ok: true, hasMasterAccess: grant });
+});
+
+// ---- Referral codes (master access only) --------------------------------
+// A valid, active code lets registration skip the pending-approval step
+// (still requires email verification) — see routes/auth.js
+// register/verify-email.
+
+router.get('/referral-codes', requireMasterAccess, (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT rc.code, rc.is_active, rc.uses_count, rc.created_at, u.display_name AS created_by_name
+       FROM referral_codes rc JOIN users u ON u.id = rc.created_by
+       ORDER BY rc.created_at DESC`
+    )
+    .all();
+  res.json({ codes: rows });
+});
+
+router.post('/referral-codes', requireMasterAccess, (req, res) => {
+  const code = generateReferralCode();
+  db.prepare('INSERT INTO referral_codes (code, created_by) VALUES (?, ?)').run(code, req.user.id);
+  res.status(201).json({ code });
+});
+
+router.post('/referral-codes/:code/deactivate', requireMasterAccess, (req, res) => {
+  const info = db.prepare('UPDATE referral_codes SET is_active = 0 WHERE code = ?').run(req.params.code);
+  if (info.changes === 0) return res.status(404).json({ error: 'Referral code not found' });
+  res.json({ ok: true });
+});
+
+router.post('/referral-codes/:code/reactivate', requireMasterAccess, (req, res) => {
+  const info = db.prepare('UPDATE referral_codes SET is_active = 1 WHERE code = ?').run(req.params.code);
+  if (info.changes === 0) return res.status(404).json({ error: 'Referral code not found' });
+  res.json({ ok: true });
+});
+
+// ---- Signup requests: no-referral-code registrations (plain admin) ------
+// Unlike admin_requests (master-access only, reviewing whether someone
+// gets elevated admin power), any admin can approve a plain viewer signup
+// — lower stakes, matches "any admin can approve" from the roadmap
+// discussion.
+
+router.get('/signup-requests', (req, res) => {
+  const status = req.query.status || 'pending';
+  const rows = db
+    .prepare(
+      `SELECT sr.id, sr.status, sr.created_at, u.id AS user_id, u.email, u.display_name
+       FROM signup_requests sr JOIN users u ON u.id = sr.user_id
+       WHERE sr.status = ?
+       ORDER BY sr.created_at DESC`
+    )
+    .all(status);
+  res.json({ requests: rows });
+});
+
+router.post('/signup-requests/:id/approve', (req, res) => {
+  const request = db.prepare("SELECT * FROM signup_requests WHERE id = ? AND status = 'pending'").get(req.params.id);
+  if (!request) return res.status(404).json({ error: 'Pending request not found' });
+
+  db.prepare("UPDATE users SET signup_status = 'active' WHERE id = ?").run(request.user_id);
+  db.prepare(
+    "UPDATE signup_requests SET status = 'approved', reviewed_by = ?, reviewed_at = datetime('now') WHERE id = ?"
+  ).run(req.user.id, request.id);
+
+  res.json({ ok: true });
+});
+
+router.post('/signup-requests/:id/reject', (req, res) => {
+  const request = db.prepare("SELECT * FROM signup_requests WHERE id = ? AND status = 'pending'").get(req.params.id);
+  if (!request) return res.status(404).json({ error: 'Pending request not found' });
+
+  db.prepare(
+    "UPDATE signup_requests SET status = 'rejected', reviewed_by = ?, reviewed_at = datetime('now') WHERE id = ?"
+  ).run(req.user.id, request.id);
+
+  res.json({ ok: true });
 });
 
 // ---- Folders (plain admin and up) --------------------------------------

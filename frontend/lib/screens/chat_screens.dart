@@ -114,11 +114,20 @@ class ChatRequestsScreen extends StatefulWidget {
 class _ChatRequestsScreenState extends State<ChatRequestsScreen> {
   List<Map<String, dynamic>>? _requests;
   String? _error;
+  final _searchController = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     _load();
+    _searchController.addListener(() => setState(() => _query = _searchController.text.trim().toLowerCase()));
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -133,6 +142,16 @@ class _ChatRequestsScreenState extends State<ChatRequestsScreen> {
       _requests = (res.body['requests'] as List).cast<Map<String, dynamic>>();
       _error = null;
     });
+  }
+
+  List<Map<String, dynamic>> get _filteredRequests {
+    if (_requests == null) return [];
+    if (_query.isEmpty) return _requests!;
+    return _requests!
+        .where((r) =>
+            (r['display_name'] as String).toLowerCase().contains(_query) ||
+            (r['email'] as String).toLowerCase().contains(_query))
+        .toList();
   }
 
   Future<void> _approve(Map<String, dynamic> request) async {
@@ -163,7 +182,24 @@ class _ChatRequestsScreenState extends State<ChatRequestsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Chat requests')),
-      body: RefreshIndicator(onRefresh: _load, child: _buildBody()),
+      body: Column(
+        children: [
+          if ((_requests?.length ?? 0) > 5)
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: TextField(
+                controller: _searchController,
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search),
+                  hintText: 'Search by name or email',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ),
+          Expanded(child: RefreshIndicator(onRefresh: _load, child: _buildBody())),
+        ],
+      ),
     );
   }
 
@@ -175,11 +211,15 @@ class _ChatRequestsScreenState extends State<ChatRequestsScreen> {
         children: const [SizedBox(height: 60), Center(child: Text('No pending chat requests.'))],
       );
     }
+    final filtered = _filteredRequests;
+    if (filtered.isEmpty) {
+      return ListView(children: const [SizedBox(height: 60), Center(child: Text('No matches.'))]);
+    }
     return ListView.builder(
       padding: const EdgeInsets.all(12),
-      itemCount: _requests!.length,
+      itemCount: filtered.length,
       itemBuilder: (context, i) {
-        final r = _requests![i];
+        final r = filtered[i];
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
           child: Padding(
@@ -222,11 +262,20 @@ class ChatThreadsScreen extends StatefulWidget {
 class _ChatThreadsScreenState extends State<ChatThreadsScreen> {
   List<Map<String, dynamic>>? _threads;
   String? _error;
+  final _searchController = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     _load();
+    _searchController.addListener(() => setState(() => _query = _searchController.text.trim().toLowerCase()));
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -243,11 +292,38 @@ class _ChatThreadsScreenState extends State<ChatThreadsScreen> {
     });
   }
 
+  List<Map<String, dynamic>> get _filteredThreads {
+    if (_threads == null) return [];
+    if (_query.isEmpty) return _threads!;
+    return _threads!
+        .where((t) =>
+            (t['display_name'] as String).toLowerCase().contains(_query) ||
+            (t['email'] as String).toLowerCase().contains(_query))
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Messages')),
-      body: RefreshIndicator(onRefresh: _load, child: _buildBody()),
+      body: Column(
+        children: [
+          if ((_threads?.length ?? 0) > 5)
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: TextField(
+                controller: _searchController,
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search),
+                  hintText: 'Search conversations',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ),
+          Expanded(child: RefreshIndicator(onRefresh: _load, child: _buildBody())),
+        ],
+      ),
     );
   }
 
@@ -259,11 +335,15 @@ class _ChatThreadsScreenState extends State<ChatThreadsScreen> {
         children: const [SizedBox(height: 60), Center(child: Text('No conversations yet.'))],
       );
     }
+    final filtered = _filteredThreads;
+    if (filtered.isEmpty) {
+      return ListView(children: const [SizedBox(height: 60), Center(child: Text('No matches.'))]);
+    }
     return ListView.separated(
-      itemCount: _threads!.length,
+      itemCount: filtered.length,
       separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, i) {
-        final t = _threads![i];
+        final t = filtered[i];
         return ListTile(
           leading: const Icon(Icons.chat_bubble_outline),
           title: Text(t['display_name'] as String),

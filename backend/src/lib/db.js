@@ -18,6 +18,11 @@ db.exec(`
   -- admin gets owner-level powers too (approve requests, toggle other
   -- admins' master access). Off by default — owner grants it explicitly
   -- per admin, per the tiered model decided for this feature.
+  -- email_verified: must be 1 before a viewer can do anything past
+  -- registration (see requireEmailVerified middleware). signup_status:
+  -- 'active' (referral code used, or email-verified path completed) |
+  -- 'pending_approval' (registered without a referral code, waiting on
+  -- any admin to approve — see signup_requests below).
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT UNIQUE NOT NULL,
@@ -25,6 +30,44 @@ db.exec(`
     display_name TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'admin', 'owner')),
     has_master_access INTEGER NOT NULL DEFAULT 0,
+    email_verified INTEGER NOT NULL DEFAULT 0,
+    signup_status TEXT NOT NULL DEFAULT 'active' CHECK (signup_status IN ('active', 'pending_approval')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- A 6-digit code emailed at registration (and resend). Verified once;
+  -- rows are kept (not deleted) for a simple audit trail, superseded rows
+  -- just stay unused. expires_at bounds how long a code is valid.
+  CREATE TABLE IF NOT EXISTS email_verification_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    code TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Referral codes: created only by owner/master-access admins. A valid,
+  -- active code entered at registration skips the pending-approval step
+  -- entirely (still requires email verification). is_active lets an admin
+  -- deactivate a code without deleting its usage history.
+  CREATE TABLE IF NOT EXISTS referral_codes (
+    code TEXT PRIMARY KEY,
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    is_active INTEGER NOT NULL DEFAULT 1,
+    uses_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- A pending "no referral code" signup, waiting for any admin to approve
+  -- or reject. Mirrors admin_requests' shape/spirit but simpler — no
+  -- identity form, just an account waiting on a yes/no.
+  CREATE TABLE IF NOT EXISTS signup_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+    reviewed_by INTEGER REFERENCES users(id),
+    reviewed_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -169,12 +212,18 @@ db.exec(`
 // initial CREATE TABLE above, so existing local/deployed DBs upgrade
 // in place instead of needing a manual wipe. SQLite has no
 // "ADD COLUMN IF NOT EXISTS", so we check pragma table_info first.
+// Returns true if the column was actually added (false if it already
+// existed) — callers use this to run one-time backfill logic only on a
+// genuine upgrade, not on a fresh install where the CREATE TABLE above
+// already has the right defaults.
 function ensureColumn(table, column, definition) {
   const existing = db.prepare(`PRAGMA table_info(${table})`).all();
   const hasColumn = existing.some((col) => col.name === column);
   if (!hasColumn) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    return true;
   }
+  return false;
 }
 
 ensureColumn('users', 'role', "TEXT NOT NULL DEFAULT 'viewer'");
@@ -182,5 +231,17 @@ ensureColumn('users', 'has_master_access', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('assets', 'uploaded_by', 'INTEGER REFERENCES users(id)');
 ensureColumn('assets', 'folder_id', 'TEXT REFERENCES folders(id)');
 ensureColumn('access_log', 'asset_title', 'TEXT');
+const emailVerifiedColumnIsNew = ensureColumn('users', 'email_verified', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('users', 'signup_status', "TEXT NOT NULL DEFAULT 'active'");
+
+// Existing accounts (from before this feature existed) should not suddenly
+// be locked out by the new email-verification requirement — grandfather
+// them in as already verified/active, but only as a one-time backfill on a
+// genuine upgrade (i.e. this boot is the one that just added the column).
+// A fresh install never runs this: new registrations from here on go
+// through the real verification flow and should NOT be auto-verified.
+if (emailVerifiedColumnIsNew) {
+  db.prepare("UPDATE users SET email_verified = 1, signup_status = 'active'").run();
+}
 
 module.exports = db;

@@ -9,6 +9,8 @@ import 'manage_admins_screen.dart';
 import 'manage_assets_screen.dart';
 import 'user_activity_screen.dart';
 import 'chat_screens.dart';
+import 'referral_codes_screen.dart';
+import 'signup_requests_screen.dart';
 
 class AssetSummary {
   AssetSummary({required this.id, required this.type, required this.title});
@@ -59,6 +61,8 @@ class _AssetListScreenState extends State<AssetListScreen> {
   List<FolderSummary>? _folders;
   List<AssetSummary>? _assets;
   String? _error;
+  final _searchController = TextEditingController();
+  String _query = '';
 
   // Breadcrumb stack: null = root. Each entry is (folderId, folderName).
   final List<(String, String)> _path = [];
@@ -69,6 +73,25 @@ class _AssetListScreenState extends State<AssetListScreen> {
   void initState() {
     super.initState();
     _load();
+    _searchController.addListener(() => setState(() => _query = _searchController.text.trim().toLowerCase()));
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<FolderSummary> get _filteredFolders {
+    if (_folders == null) return [];
+    if (_query.isEmpty) return _folders!;
+    return _folders!.where((f) => f.name.toLowerCase().contains(_query)).toList();
+  }
+
+  List<AssetSummary> get _filteredAssets {
+    if (_assets == null) return [];
+    if (_query.isEmpty) return _assets!;
+    return _assets!.where((a) => a.title.toLowerCase().contains(_query)).toList();
   }
 
   Future<void> _load() async {
@@ -121,10 +144,26 @@ class _AssetListScreenState extends State<AssetListScreen> {
       body: Column(
         children: [
           if (_path.isNotEmpty) _buildBreadcrumbs(),
+          if ((_folders?.isNotEmpty ?? false) || (_assets?.isNotEmpty ?? false)) _buildSearchBar(),
           Expanded(
             child: RefreshIndicator(onRefresh: _load, child: _buildBody()),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: TextField(
+        controller: _searchController,
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.search),
+          hintText: 'Search this folder',
+          isDense: true,
+          border: OutlineInputBorder(),
+        ),
       ),
     );
   }
@@ -177,6 +216,14 @@ class _AssetListScreenState extends State<AssetListScreen> {
             Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const UserActivityScreen()),
             );
+          case 'signup_requests':
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SignupRequestsScreen()),
+            );
+          case 'referral_codes':
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ReferralCodesScreen()),
+            );
           case 'chat_requests':
             Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const ChatRequestsScreen()),
@@ -227,6 +274,13 @@ class _AssetListScreenState extends State<AssetListScreen> {
               title: Text('Users & activity'),
             ),
           ),
+          const PopupMenuItem(
+            value: 'signup_requests',
+            child: ListTile(
+              leading: Icon(Icons.how_to_reg_outlined),
+              title: Text('Signup requests'),
+            ),
+          ),
         ],
         if (session.effectiveMasterAccess) ...[
           const PopupMenuItem(
@@ -241,6 +295,13 @@ class _AssetListScreenState extends State<AssetListScreen> {
             child: ListTile(
               leading: Icon(Icons.admin_panel_settings_outlined),
               title: Text('Manage admins'),
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'referral_codes',
+            child: ListTile(
+              leading: Icon(Icons.qr_code),
+              title: Text('Referral codes'),
             ),
           ),
         ],
@@ -297,18 +358,25 @@ class _AssetListScreenState extends State<AssetListScreen> {
         ],
       );
     }
+    final folders = _filteredFolders;
+    final assets = _filteredAssets;
+    if (folders.isEmpty && assets.isEmpty) {
+      return ListView(
+        children: const [SizedBox(height: 80), Center(child: Text('No matches for your search.'))],
+      );
+    }
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
-        for (final folder in _folders!)
+        for (final folder in folders)
           ListTile(
             leading: const Icon(Icons.folder_outlined),
             title: Text(folder.name),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _openFolder(folder),
           ),
-        if (_folders!.isNotEmpty && _assets!.isNotEmpty) const Divider(height: 1),
-        for (final asset in _assets!)
+        if (folders.isNotEmpty && assets.isNotEmpty) const Divider(height: 1),
+        for (final asset in assets)
           ListTile(
             leading: Icon(asset.icon),
             title: Text(asset.title),

@@ -40,6 +40,8 @@ class _ManageAssetsScreenState extends State<ManageAssetsScreen> {
   List<AdminFolderSummary>? _folders;
   List<AdminAssetSummary>? _assets;
   String? _error;
+  final _searchController = TextEditingController();
+  String _query = '';
 
   final List<(String, String)> _path = [];
   String? get _currentFolderId => _path.isEmpty ? null : _path.last.$1;
@@ -48,6 +50,25 @@ class _ManageAssetsScreenState extends State<ManageAssetsScreen> {
   void initState() {
     super.initState();
     _load();
+    _searchController.addListener(() => setState(() => _query = _searchController.text.trim().toLowerCase()));
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<AdminFolderSummary> get _filteredFolders {
+    if (_folders == null) return [];
+    if (_query.isEmpty) return _folders!;
+    return _folders!.where((f) => f.name.toLowerCase().contains(_query)).toList();
+  }
+
+  List<AdminAssetSummary> get _filteredAssets {
+    if (_assets == null) return [];
+    if (_query.isEmpty) return _assets!;
+    return _assets!.where((a) => a.title.toLowerCase().contains(_query)).toList();
   }
 
   Future<void> _load() async {
@@ -233,8 +254,24 @@ class _ManageAssetsScreenState extends State<ManageAssetsScreen> {
       body: Column(
         children: [
           if (_path.isNotEmpty) _buildBreadcrumbs(),
+          if ((_folders?.isNotEmpty ?? false) || (_assets?.isNotEmpty ?? false)) _buildSearchBar(),
           Expanded(child: RefreshIndicator(onRefresh: _load, child: _buildBody())),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: TextField(
+        controller: _searchController,
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.search),
+          hintText: 'Search this folder',
+          isDense: true,
+          border: OutlineInputBorder(),
+        ),
       ),
     );
   }
@@ -278,10 +315,17 @@ class _ManageAssetsScreenState extends State<ManageAssetsScreen> {
         ],
       );
     }
+    final folders = _filteredFolders;
+    final assets = _filteredAssets;
+    if (folders.isEmpty && assets.isEmpty) {
+      return ListView(
+        children: const [SizedBox(height: 60), Center(child: Text('No matches for your search.'))],
+      );
+    }
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
-        for (final folder in _folders!)
+        for (final folder in folders)
           ListTile(
             leading: const Icon(Icons.folder_outlined),
             title: Text(folder.name),
@@ -304,8 +348,8 @@ class _ManageAssetsScreenState extends State<ManageAssetsScreen> {
               ],
             ),
           ),
-        if (_folders!.isNotEmpty && _assets!.isNotEmpty) const Divider(height: 1),
-        for (final asset in _assets!)
+        if (folders.isNotEmpty && assets.isNotEmpty) const Divider(height: 1),
+        for (final asset in assets)
           ListTile(
             leading: Icon(asset.type == 'image' ? Icons.image_outlined : Icons.code_outlined),
             title: Text(asset.title),
@@ -473,11 +517,28 @@ class _AssetGrantsDialogState extends State<_AssetGrantsDialog> {
   List<_ViewerOption>? _allViewers;
   Set<int> _grantedUserIds = {};
   bool _loading = true;
+  final _searchController = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     _load();
+    _searchController.addListener(() => setState(() => _query = _searchController.text.trim().toLowerCase()));
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<_ViewerOption> get _filteredViewers {
+    if (_allViewers == null) return [];
+    if (_query.isEmpty) return _allViewers!;
+    return _allViewers!
+        .where((v) => v.displayName.toLowerCase().contains(_query) || v.email.toLowerCase().contains(_query))
+        .toList();
   }
 
   Future<void> _load() async {
@@ -518,28 +579,51 @@ class _AssetGrantsDialogState extends State<_AssetGrantsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final filtered = _filteredViewers;
     return AlertDialog(
       title: Text('Access to "${widget.asset.title}"'),
       content: SizedBox(
         width: 360,
-        height: 400,
+        height: 440,
         child: _loading
             ? const Center(child: CircularProgressIndicator())
-            : (_allViewers!.isEmpty
-                ? const Center(child: Text('No viewer accounts exist yet.'))
-                : ListView.builder(
-                    itemCount: _allViewers!.length,
-                    itemBuilder: (context, i) {
-                      final viewer = _allViewers![i];
-                      final granted = _grantedUserIds.contains(viewer.id);
-                      return CheckboxListTile(
-                        value: granted,
-                        title: Text(viewer.displayName),
-                        subtitle: Text(viewer.email),
-                        onChanged: (value) => _toggle(viewer, value ?? false),
-                      );
-                    },
-                  )),
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if ((_allViewers?.length ?? 0) > 5)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.search),
+                          hintText: 'Search viewers',
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                  Expanded(
+                    child: _allViewers!.isEmpty
+                        ? const Center(child: Text('No viewer accounts exist yet.'))
+                        : (filtered.isEmpty
+                            ? const Center(child: Text('No matches.'))
+                            : ListView.builder(
+                                itemCount: filtered.length,
+                                itemBuilder: (context, i) {
+                                  final viewer = filtered[i];
+                                  final granted = _grantedUserIds.contains(viewer.id);
+                                  return CheckboxListTile(
+                                    value: granted,
+                                    title: Text(viewer.displayName),
+                                    subtitle: Text(viewer.email),
+                                    onChanged: (value) => _toggle(viewer, value ?? false),
+                                  );
+                                },
+                              )),
+                  ),
+                ],
+              ),
       ),
       actions: [
         FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Done')),
@@ -561,11 +645,28 @@ class _FolderGrantsDialogState extends State<_FolderGrantsDialog> {
   List<_ViewerOption>? _allViewers;
   Set<int> _grantedUserIds = {};
   bool _loading = true;
+  final _searchController = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     _load();
+    _searchController.addListener(() => setState(() => _query = _searchController.text.trim().toLowerCase()));
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<_ViewerOption> get _filteredViewers {
+    if (_allViewers == null) return [];
+    if (_query.isEmpty) return _allViewers!;
+    return _allViewers!
+        .where((v) => v.displayName.toLowerCase().contains(_query) || v.email.toLowerCase().contains(_query))
+        .toList();
   }
 
   Future<void> _load() async {
@@ -606,11 +707,12 @@ class _FolderGrantsDialogState extends State<_FolderGrantsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final filtered = _filteredViewers;
     return AlertDialog(
       title: Text('Access to "${widget.folder.name}"'),
       content: SizedBox(
         width: 360,
-        height: 400,
+        height: 440,
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : Column(
@@ -624,22 +726,37 @@ class _FolderGrantsDialogState extends State<_FolderGrantsDialog> {
                       style: TextStyle(fontSize: 12),
                     ),
                   ),
+                  if ((_allViewers?.length ?? 0) > 5)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.search),
+                          hintText: 'Search viewers',
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
                   Expanded(
                     child: _allViewers!.isEmpty
                         ? const Center(child: Text('No viewer accounts exist yet.'))
-                        : ListView.builder(
-                            itemCount: _allViewers!.length,
-                            itemBuilder: (context, i) {
-                              final viewer = _allViewers![i];
-                              final granted = _grantedUserIds.contains(viewer.id);
-                              return CheckboxListTile(
-                                value: granted,
-                                title: Text(viewer.displayName),
-                                subtitle: Text(viewer.email),
-                                onChanged: (value) => _toggle(viewer, value ?? false),
-                              );
-                            },
-                          ),
+                        : (filtered.isEmpty
+                            ? const Center(child: Text('No matches.'))
+                            : ListView.builder(
+                                itemCount: filtered.length,
+                                itemBuilder: (context, i) {
+                                  final viewer = filtered[i];
+                                  final granted = _grantedUserIds.contains(viewer.id);
+                                  return CheckboxListTile(
+                                    value: granted,
+                                    title: Text(viewer.displayName),
+                                    subtitle: Text(viewer.email),
+                                    onChanged: (value) => _toggle(viewer, value ?? false),
+                                  );
+                                },
+                              )),
                   ),
                 ],
               ),
