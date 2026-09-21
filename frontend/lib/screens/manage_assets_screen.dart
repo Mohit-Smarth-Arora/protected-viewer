@@ -16,9 +16,19 @@ class AdminAssetSummary {
   final String? uploadedByName;
 }
 
-/// Plain-admin-and-up screen: upload new assets (image/snippet), delete
-/// assets, and manage per-viewer grants. Reachable by any admin — no
-/// master access required, per the tiered model.
+class AdminFolderSummary {
+  AdminFolderSummary.fromJson(Map<String, dynamic> json)
+      : id = json['id'] as String,
+        name = json['name'] as String;
+
+  final String id;
+  final String name;
+}
+
+/// Plain-admin-and-up screen: browse/create/rename/delete folders, upload
+/// new assets into the current folder, delete assets, and manage per-viewer
+/// grants at both the folder and asset level. Mirrors AssetListScreen's
+/// browsing model but with admin controls layered on.
 class ManageAssetsScreen extends StatefulWidget {
   const ManageAssetsScreen({super.key});
 
@@ -27,8 +37,12 @@ class ManageAssetsScreen extends StatefulWidget {
 }
 
 class _ManageAssetsScreenState extends State<ManageAssetsScreen> {
+  List<AdminFolderSummary>? _folders;
   List<AdminAssetSummary>? _assets;
   String? _error;
+
+  final List<(String, String)> _path = [];
+  String? get _currentFolderId => _path.isEmpty ? null : _path.last.$1;
 
   @override
   void initState() {
@@ -38,29 +52,130 @@ class _ManageAssetsScreenState extends State<ManageAssetsScreen> {
 
   Future<void> _load() async {
     final api = context.read<ApiClient>();
-    final res = await api.listAdminAssets();
+    final res = await api.listAssets(folderId: _currentFolderId);
     if (!mounted) return;
     if (!res.ok) {
-      setState(() => _error = res.error ?? 'Failed to load assets');
+      setState(() => _error = res.error ?? 'Failed to load');
       return;
     }
-    final list = (res.body['assets'] as List)
-        .map((a) => AdminAssetSummary.fromJson(a as Map<String, dynamic>))
-        .toList();
     setState(() {
-      _assets = list;
+      _folders = (res.body['folders'] as List)
+          .map((f) => AdminFolderSummary.fromJson(f as Map<String, dynamic>))
+          .toList();
+      _assets = (res.body['assets'] as List)
+          .map((a) => AdminAssetSummary.fromJson(a as Map<String, dynamic>))
+          .toList();
       _error = null;
     });
+  }
+
+  void _openFolder(AdminFolderSummary folder) {
+    setState(() => _path.add((folder.id, folder.name)));
+    _load();
+  }
+
+  void _goToBreadcrumb(int index) {
+    setState(() => _path.removeRange(index + 1, _path.length));
+    _load();
+  }
+
+  Future<void> _createFolder() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('New folder'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Folder name'),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty || !mounted) return;
+
+    final api = context.read<ApiClient>();
+    final res = await api.createFolder(name: name, parentId: _currentFolderId);
+    if (!mounted) return;
+    if (res.ok) {
+      _load();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error ?? 'Could not create folder')));
+    }
+  }
+
+  Future<void> _renameFolder(AdminFolderSummary folder) async {
+    final controller = TextEditingController(text: folder.name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Rename folder'),
+        content: TextField(controller: controller, autofocus: true),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty || name == folder.name || !mounted) return;
+
+    final api = context.read<ApiClient>();
+    final res = await api.renameFolder(folder.id, name);
+    if (!mounted) return;
+    if (res.ok) _load();
+  }
+
+  Future<void> _deleteFolder(AdminFolderSummary folder) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Delete "${folder.name}"?'),
+        content: const Text(
+          'This deletes the folder, everything inside it (subfolders and assets), and all related access grants. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final api = context.read<ApiClient>();
+    final res = await api.deleteFolder(folder.id);
+    if (!mounted) return;
+    if (res.ok) {
+      _load();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error ?? 'Delete failed')));
+    }
+  }
+
+  Future<void> _manageFolderGrants(AdminFolderSummary folder) async {
+    await showDialog(
+      context: context,
+      builder: (_) => _FolderGrantsDialog(folder: folder),
+    );
   }
 
   Future<void> _showUploadDialog() async {
     await showDialog(
       context: context,
-      builder: (_) => _UploadAssetDialog(onUploaded: _load),
+      builder: (_) => _UploadAssetDialog(folderId: _currentFolderId, onUploaded: _load),
     );
   }
 
-  Future<void> _delete(AdminAssetSummary asset) async {
+  Future<void> _deleteAsset(AdminAssetSummary asset) async {
     final api = context.read<ApiClient>();
     final confirmed = await showDialog<bool>(
       context: context,
@@ -84,10 +199,10 @@ class _ManageAssetsScreenState extends State<ManageAssetsScreen> {
     }
   }
 
-  Future<void> _manageGrants(AdminAssetSummary asset) async {
+  Future<void> _manageAssetGrants(AdminAssetSummary asset) async {
     await showDialog(
       context: context,
-      builder: (_) => _GrantsDialog(asset: asset),
+      builder: (_) => _AssetGrantsDialog(asset: asset),
     );
   }
 
@@ -95,20 +210,55 @@ class _ManageAssetsScreenState extends State<ManageAssetsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Manage assets'),
+        title: Text(_path.isEmpty ? 'Manage assets' : _path.last.$2),
+        leading: _path.isEmpty
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => _goToBreadcrumb(_path.length - 2),
+              ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.create_new_folder_outlined),
+            tooltip: 'New folder',
+            onPressed: _createFolder,
+          ),
+          IconButton(
             icon: const Icon(Icons.upload_file),
-            tooltip: 'Upload asset',
+            tooltip: 'Upload asset here',
             onPressed: _showUploadDialog,
           ),
         ],
       ),
-      body: RefreshIndicator(onRefresh: _load, child: _buildBody()),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showUploadDialog,
-        icon: const Icon(Icons.add),
-        label: const Text('Upload'),
+      body: Column(
+        children: [
+          if (_path.isNotEmpty) _buildBreadcrumbs(),
+          Expanded(child: RefreshIndicator(onRefresh: _load, child: _buildBody())),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBreadcrumbs() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          InkWell(
+            onTap: () => _goToBreadcrumb(-1),
+            child: const Padding(padding: EdgeInsets.symmetric(horizontal: 4), child: Icon(Icons.home, size: 18)),
+          ),
+          for (var i = 0; i < _path.length; i++) ...[
+            const Icon(Icons.chevron_right, size: 18),
+            InkWell(
+              onTap: () => _goToBreadcrumb(i),
+              child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Text(_path[i].$2)),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -117,49 +267,75 @@ class _ManageAssetsScreenState extends State<ManageAssetsScreen> {
     if (_error != null) {
       return ListView(children: [const SizedBox(height: 60), Center(child: Text(_error!))]);
     }
-    if (_assets == null) {
+    if (_folders == null || _assets == null) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_assets!.isEmpty) {
+    if (_folders!.isEmpty && _assets!.isEmpty) {
       return ListView(
-        children: const [SizedBox(height: 60), Center(child: Text('No assets uploaded yet.'))],
+        children: const [
+          SizedBox(height: 60),
+          Center(child: Text('Empty. Create a folder or upload an asset.')),
+        ],
       );
     }
-    return ListView.separated(
+    return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: _assets!.length,
-      separatorBuilder: (_, _) => const Divider(height: 1),
-      itemBuilder: (context, i) {
-        final asset = _assets![i];
-        return ListTile(
-          leading: Icon(asset.type == 'image' ? Icons.image_outlined : Icons.code_outlined),
-          title: Text(asset.title),
-          subtitle: Text('${asset.type}${asset.uploadedByName != null ? " • by ${asset.uploadedByName}" : ""}'),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.people_outline),
-                tooltip: 'Manage access',
-                onPressed: () => _manageGrants(asset),
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline),
-                tooltip: 'Delete',
-                onPressed: () => _delete(asset),
-              ),
-            ],
+      children: [
+        for (final folder in _folders!)
+          ListTile(
+            leading: const Icon(Icons.folder_outlined),
+            title: Text(folder.name),
+            onTap: () => _openFolder(folder),
+            trailing: PopupMenuButton<String>(
+              onSelected: (value) {
+                switch (value) {
+                  case 'access':
+                    _manageFolderGrants(folder);
+                  case 'rename':
+                    _renameFolder(folder);
+                  case 'delete':
+                    _deleteFolder(folder);
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'access', child: Text('Manage access')),
+                PopupMenuItem(value: 'rename', child: Text('Rename')),
+                PopupMenuItem(value: 'delete', child: Text('Delete')),
+              ],
+            ),
           ),
-        );
-      },
+        if (_folders!.isNotEmpty && _assets!.isNotEmpty) const Divider(height: 1),
+        for (final asset in _assets!)
+          ListTile(
+            leading: Icon(asset.type == 'image' ? Icons.image_outlined : Icons.code_outlined),
+            title: Text(asset.title),
+            subtitle: Text('${asset.type}${asset.uploadedByName != null ? " • by ${asset.uploadedByName}" : ""}'),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.people_outline),
+                  tooltip: 'Manage access',
+                  onPressed: () => _manageAssetGrants(asset),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: 'Delete',
+                  onPressed: () => _deleteAsset(asset),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }
 
 class _UploadAssetDialog extends StatefulWidget {
-  const _UploadAssetDialog({required this.onUploaded});
+  const _UploadAssetDialog({required this.onUploaded, this.folderId});
 
   final VoidCallback onUploaded;
+  final String? folderId;
 
   @override
   State<_UploadAssetDialog> createState() => _UploadAssetDialogState();
@@ -284,16 +460,16 @@ class _ViewerOption {
   final String displayName;
 }
 
-class _GrantsDialog extends StatefulWidget {
-  const _GrantsDialog({required this.asset});
+class _AssetGrantsDialog extends StatefulWidget {
+  const _AssetGrantsDialog({required this.asset});
 
   final AdminAssetSummary asset;
 
   @override
-  State<_GrantsDialog> createState() => _GrantsDialogState();
+  State<_AssetGrantsDialog> createState() => _AssetGrantsDialogState();
 }
 
-class _GrantsDialogState extends State<_GrantsDialog> {
+class _AssetGrantsDialogState extends State<_AssetGrantsDialog> {
   List<_ViewerOption>? _allViewers;
   Set<int> _grantedUserIds = {};
   bool _loading = true;
@@ -311,13 +487,10 @@ class _GrantsDialogState extends State<_GrantsDialog> {
     if (!mounted) return;
 
     final viewers = usersRes.ok
-        ? (usersRes.body['users'] as List)
-            .map((u) => _ViewerOption.fromJson(u as Map<String, dynamic>))
-            .toList()
+        ? (usersRes.body['users'] as List).map((u) => _ViewerOption.fromJson(u as Map<String, dynamic>)).toList()
         : <_ViewerOption>[];
-    final granted = grantsRes.ok
-        ? (grantsRes.body['grants'] as List).map((g) => g['user_id'] as int).toSet()
-        : <int>{};
+    final granted =
+        grantsRes.ok ? (grantsRes.body['grants'] as List).map((g) => g['user_id'] as int).toSet() : <int>{};
 
     setState(() {
       _allViewers = viewers;
@@ -369,10 +542,110 @@ class _GrantsDialogState extends State<_GrantsDialog> {
                   )),
       ),
       actions: [
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Done'),
-        ),
+        FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Done')),
+      ],
+    );
+  }
+}
+
+class _FolderGrantsDialog extends StatefulWidget {
+  const _FolderGrantsDialog({required this.folder});
+
+  final AdminFolderSummary folder;
+
+  @override
+  State<_FolderGrantsDialog> createState() => _FolderGrantsDialogState();
+}
+
+class _FolderGrantsDialogState extends State<_FolderGrantsDialog> {
+  List<_ViewerOption>? _allViewers;
+  Set<int> _grantedUserIds = {};
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final api = context.read<ApiClient>();
+    final usersRes = await api.listViewers();
+    final grantsRes = await api.listFolderGrants(widget.folder.id);
+    if (!mounted) return;
+
+    final viewers = usersRes.ok
+        ? (usersRes.body['users'] as List).map((u) => _ViewerOption.fromJson(u as Map<String, dynamic>)).toList()
+        : <_ViewerOption>[];
+    final granted =
+        grantsRes.ok ? (grantsRes.body['grants'] as List).map((g) => g['user_id'] as int).toSet() : <int>{};
+
+    setState(() {
+      _allViewers = viewers;
+      _grantedUserIds = granted;
+      _loading = false;
+    });
+  }
+
+  Future<void> _toggle(_ViewerOption viewer, bool grant) async {
+    final api = context.read<ApiClient>();
+    final res = grant
+        ? await api.grantFolder(widget.folder.id, viewer.id)
+        : await api.revokeFolderGrant(widget.folder.id, viewer.id);
+    if (!mounted) return;
+    if (res.ok) {
+      setState(() {
+        if (grant) {
+          _grantedUserIds.add(viewer.id);
+        } else {
+          _grantedUserIds.remove(viewer.id);
+        }
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Access to "${widget.folder.name}"'),
+      content: SizedBox(
+        width: 360,
+        height: 400,
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      'Granting this folder also grants everything inside it, including subfolders.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  Expanded(
+                    child: _allViewers!.isEmpty
+                        ? const Center(child: Text('No viewer accounts exist yet.'))
+                        : ListView.builder(
+                            itemCount: _allViewers!.length,
+                            itemBuilder: (context, i) {
+                              final viewer = _allViewers![i];
+                              final granted = _grantedUserIds.contains(viewer.id);
+                              return CheckboxListTile(
+                                value: granted,
+                                title: Text(viewer.displayName),
+                                subtitle: Text(viewer.email),
+                                onChanged: (value) => _toggle(viewer, value ?? false),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+      ),
+      actions: [
+        FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Done')),
       ],
     );
   }

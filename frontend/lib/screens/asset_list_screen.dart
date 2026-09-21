@@ -7,6 +7,8 @@ import 'admin_request_screen.dart';
 import 'admin_review_screen.dart';
 import 'manage_admins_screen.dart';
 import 'manage_assets_screen.dart';
+import 'user_activity_screen.dart';
+import 'chat_screens.dart';
 
 class AssetSummary {
   AssetSummary({required this.id, required this.type, required this.title});
@@ -29,6 +31,23 @@ class AssetSummary {
       };
 }
 
+class FolderSummary {
+  FolderSummary({required this.id, required this.name});
+
+  factory FolderSummary.fromJson(Map<String, dynamic> json) => FolderSummary(
+        id: json['id'] as String,
+        name: json['name'] as String,
+      );
+
+  final String id;
+  final String name;
+}
+
+/// A viewer's (or admin's) browsable view of the shared library — folders
+/// work like a simple file browser: tap in, breadcrumb back out. Viewers
+/// only ever see folders/assets they've been granted (directly or via an
+/// ancestor folder grant); admins/owner see everything. See
+/// backend/src/routes/assets.js for the access logic this mirrors.
 class AssetListScreen extends StatefulWidget {
   const AssetListScreen({super.key});
 
@@ -37,8 +56,14 @@ class AssetListScreen extends StatefulWidget {
 }
 
 class _AssetListScreenState extends State<AssetListScreen> {
+  List<FolderSummary>? _folders;
   List<AssetSummary>? _assets;
   String? _error;
+
+  // Breadcrumb stack: null = root. Each entry is (folderId, folderName).
+  final List<(String, String)> _path = [];
+
+  String? get _currentFolderId => _path.isEmpty ? null : _path.last.$1;
 
   @override
   void initState() {
@@ -48,19 +73,34 @@ class _AssetListScreenState extends State<AssetListScreen> {
 
   Future<void> _load() async {
     final api = context.read<ApiClient>();
-    final res = await api.listAssets();
+    final res = await api.listAssets(folderId: _currentFolderId);
     if (!mounted) return;
     if (!res.ok) {
-      setState(() => _error = res.error ?? 'Failed to load assets');
+      setState(() => _error = res.error ?? 'Failed to load');
       return;
     }
-    final list = (res.body['assets'] as List)
+    final folders = (res.body['folders'] as List)
+        .map((f) => FolderSummary.fromJson(f as Map<String, dynamic>))
+        .toList();
+    final assets = (res.body['assets'] as List)
         .map((a) => AssetSummary.fromJson(a as Map<String, dynamic>))
         .toList();
     setState(() {
-      _assets = list;
+      _folders = folders;
+      _assets = assets;
       _error = null;
     });
+  }
+
+  void _openFolder(FolderSummary folder) {
+    setState(() => _path.add((folder.id, folder.name)));
+    _load();
+  }
+
+  void _goToBreadcrumb(int index) {
+    // index == -1 means root
+    setState(() => _path.removeRange(index + 1, _path.length));
+    _load();
   }
 
   @override
@@ -69,80 +109,165 @@ class _AssetListScreenState extends State<AssetListScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Shared with you'),
-        actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            onSelected: (value) {
-              switch (value) {
-                case 'manage_assets':
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const ManageAssetsScreen()),
-                  );
-                case 'manage_admins':
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const ManageAdminsScreen()),
-                  );
-                case 'review_requests':
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const AdminReviewScreen()),
-                  );
-                case 'request_admin':
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const AdminRequestScreen()),
-                  );
-                case 'sign_out':
-                  session.signOut();
-              }
-            },
-            itemBuilder: (context) => [
-              if (session.isAdmin)
-                const PopupMenuItem(
-                  value: 'manage_assets',
-                  child: ListTile(
-                    leading: Icon(Icons.folder_shared_outlined),
-                    title: Text('Manage assets'),
-                  ),
-                ),
-              if (session.effectiveMasterAccess) ...[
-                const PopupMenuItem(
-                  value: 'review_requests',
-                  child: ListTile(
-                    leading: Icon(Icons.fact_check_outlined),
-                    title: Text('Review admin requests'),
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'manage_admins',
-                  child: ListTile(
-                    leading: Icon(Icons.admin_panel_settings_outlined),
-                    title: Text('Manage admins'),
-                  ),
-                ),
-              ],
-              if (!session.isAdmin)
-                const PopupMenuItem(
-                  value: 'request_admin',
-                  child: ListTile(
-                    leading: Icon(Icons.upgrade_outlined),
-                    title: Text('Request admin access'),
-                  ),
-                ),
-              PopupMenuItem(
-                value: 'sign_out',
-                child: ListTile(
-                  leading: const Icon(Icons.logout),
-                  title: Text('Sign out (${session.userEmail ?? ''})'),
-                ),
+        title: Text(_path.isEmpty ? 'Shared with you' : _path.last.$2),
+        leading: _path.isEmpty
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => _goToBreadcrumb(_path.length - 2),
               ),
-            ],
+        actions: [_buildMenu(session)],
+      ),
+      body: Column(
+        children: [
+          if (_path.isNotEmpty) _buildBreadcrumbs(),
+          Expanded(
+            child: RefreshIndicator(onRefresh: _load, child: _buildBody()),
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _load,
-        child: _buildBody(),
+    );
+  }
+
+  Widget _buildBreadcrumbs() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          InkWell(onTap: () => _goToBreadcrumb(-1), child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4),
+            child: Icon(Icons.home, size: 18),
+          )),
+          for (var i = 0; i < _path.length; i++) ...[
+            const Icon(Icons.chevron_right, size: 18),
+            InkWell(
+              onTap: () => _goToBreadcrumb(i),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(_path[i].$2),
+              ),
+            ),
+          ],
+        ],
       ),
+    );
+  }
+
+  Widget _buildMenu(Session session) {
+    return PopupMenuButton<String>(
+      icon: const Icon(Icons.more_vert),
+      onSelected: (value) {
+        switch (value) {
+          case 'manage_assets':
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ManageAssetsScreen()),
+            );
+          case 'manage_admins':
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ManageAdminsScreen()),
+            );
+          case 'review_requests':
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AdminReviewScreen()),
+            );
+          case 'user_activity':
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const UserActivityScreen()),
+            );
+          case 'chat_requests':
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ChatRequestsScreen()),
+            );
+          case 'chat_threads':
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ChatThreadsScreen()),
+            );
+          case 'request_admin':
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AdminRequestScreen()),
+            );
+          case 'request_chat':
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const RequestChatScreen()),
+            );
+          case 'sign_out':
+            session.signOut();
+        }
+      },
+      itemBuilder: (context) => [
+        if (session.isAdmin) ...[
+          const PopupMenuItem(
+            value: 'manage_assets',
+            child: ListTile(
+              leading: Icon(Icons.folder_shared_outlined),
+              title: Text('Manage assets'),
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'chat_requests',
+            child: ListTile(
+              leading: Icon(Icons.mark_chat_unread_outlined),
+              title: Text('Chat requests'),
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'chat_threads',
+            child: ListTile(
+              leading: Icon(Icons.chat_outlined),
+              title: Text('Messages'),
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'user_activity',
+            child: ListTile(
+              leading: Icon(Icons.people_outline),
+              title: Text('Users & activity'),
+            ),
+          ),
+        ],
+        if (session.effectiveMasterAccess) ...[
+          const PopupMenuItem(
+            value: 'review_requests',
+            child: ListTile(
+              leading: Icon(Icons.fact_check_outlined),
+              title: Text('Review admin requests'),
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'manage_admins',
+            child: ListTile(
+              leading: Icon(Icons.admin_panel_settings_outlined),
+              title: Text('Manage admins'),
+            ),
+          ),
+        ],
+        if (!session.isAdmin) ...[
+          const PopupMenuItem(
+            value: 'request_chat',
+            child: ListTile(
+              leading: Icon(Icons.chat_bubble_outline),
+              title: Text('Message an admin'),
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'request_admin',
+            child: ListTile(
+              leading: Icon(Icons.upgrade_outlined),
+              title: Text('Request admin access'),
+            ),
+          ),
+        ],
+        PopupMenuItem(
+          value: 'sign_out',
+          child: ListTile(
+            leading: const Icon(Icons.logout),
+            title: Text('Sign out (${session.userEmail ?? ''})'),
+          ),
+        ),
+      ],
     );
   }
 
@@ -157,36 +282,44 @@ class _AssetListScreenState extends State<AssetListScreen> {
         ],
       );
     }
-    if (_assets == null) {
+    if (_folders == null || _assets == null) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_assets!.isEmpty) {
+    if (_folders!.isEmpty && _assets!.isEmpty) {
       return ListView(
-        children: const [
-          SizedBox(height: 80),
-          Center(child: Text('Nothing has been shared with you yet.')),
+        children: [
+          const SizedBox(height: 80),
+          Center(
+            child: Text(
+              _path.isEmpty ? 'Nothing has been shared with you yet.' : 'This folder is empty.',
+            ),
+          ),
         ],
       );
     }
-    return ListView.separated(
+    return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: _assets!.length,
-      separatorBuilder: (_, _) => const Divider(height: 1),
-      itemBuilder: (context, i) {
-        final asset = _assets![i];
-        return ListTile(
-          leading: Icon(asset.icon),
-          title: Text(asset.title),
-          subtitle: Text(asset.type),
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => AssetViewerScreen(asset: asset),
-              ),
-            );
-          },
-        );
-      },
+      children: [
+        for (final folder in _folders!)
+          ListTile(
+            leading: const Icon(Icons.folder_outlined),
+            title: Text(folder.name),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _openFolder(folder),
+          ),
+        if (_folders!.isNotEmpty && _assets!.isNotEmpty) const Divider(height: 1),
+        for (final asset in _assets!)
+          ListTile(
+            leading: Icon(asset.icon),
+            title: Text(asset.title),
+            subtitle: Text(asset.type),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => AssetViewerScreen(asset: asset)),
+              );
+            },
+          ),
+      ],
     );
   }
 }

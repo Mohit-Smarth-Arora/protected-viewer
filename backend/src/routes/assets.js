@@ -8,55 +8,86 @@ const { issueAssetToken, verifyAssetToken } = require('../lib/auth');
 const { watermarkImage, watermarkCodeSnippet } = require('../lib/watermark');
 const { STORAGE_ROOT } = require('../lib/paths');
 const { isAdmin } = require('../lib/permissions');
+const { hasAccessToAsset: folderAwareHasAccessToAsset, hasAccessToFolder } = require('../lib/folders');
 
 const router = express.Router();
 const ASSET_TOKEN_TTL = parseInt(process.env.ASSET_TOKEN_TTL_SECONDS || '120', 10);
 
-function logAccess(req, userId, assetId, action) {
+function logAccess(req, userId, assetId, action, assetTitle) {
   db.prepare(
-    'INSERT INTO access_log (user_id, asset_id, action, ip, user_agent) VALUES (?, ?, ?, ?, ?)'
-  ).run(userId, assetId, action, req.ip, req.headers['user-agent'] || null);
+    'INSERT INTO access_log (user_id, asset_id, asset_title, action, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(userId, assetId, assetTitle || null, action, req.ip, req.headers['user-agent'] || null);
 }
 
 // Admins/owner implicitly see and can request tokens for everything (they
-// manage the library). Plain viewers only get assets explicitly granted to
-// them via asset_grants — see routes/admin.js grants endpoints.
-function hasAccessToAsset(user, assetId) {
+// manage the library). Plain viewers only get assets granted directly, or
+// via a folder (or ancestor folder) grant — see lib/folders.js.
+function hasAccessToAsset(user, asset) {
   if (isAdmin(user)) return true;
-  const grant = db
-    .prepare('SELECT 1 FROM asset_grants WHERE user_id = ? AND asset_id = ?')
-    .get(user.id, assetId);
-  return !!grant;
+  return folderAwareHasAccessToAsset(user.id, asset);
 }
 
-// List available assets (metadata only — no file bytes here). Viewers only
-// see assets they've been granted; admins/owner see everything.
+// Lists both folders and assets within a given parent folder (or root when
+// folderId is omitted/null) — mirrors a typical file-browser "list this
+// directory" call. Viewers only see folders/assets they have access to;
+// admins/owner see everything. A folder is included for a viewer if it's
+// directly granted, an ancestor is granted, OR it contains (transitively)
+// something granted — so browsing down to a granted subfolder is possible
+// without granting every ancestor explicitly.
 router.get('/', requireAuth, requireAgreement, (req, res) => {
-  const rows = isAdmin(req.user)
-    ? db.prepare('SELECT id, type, title, created_at FROM assets ORDER BY created_at DESC').all()
-    : db
-        .prepare(
-          `SELECT a.id, a.type, a.title, a.created_at
-           FROM assets a JOIN asset_grants g ON g.asset_id = a.id
-           WHERE g.user_id = ?
-           ORDER BY a.created_at DESC`
-        )
-        .all(req.user.id);
-  res.json({ assets: rows });
+  const folderId = req.query.folderId || null;
+
+  if (isAdmin(req.user)) {
+    const folders = folderId
+      ? db.prepare('SELECT id, name, created_at FROM folders WHERE parent_id = ? ORDER BY name').all(folderId)
+      : db.prepare('SELECT id, name, created_at FROM folders WHERE parent_id IS NULL ORDER BY name').all();
+    const assets = folderId
+      ? db.prepare('SELECT id, type, title, created_at FROM assets WHERE folder_id = ? ORDER BY created_at DESC').all(folderId)
+      : db.prepare('SELECT id, type, title, created_at FROM assets WHERE folder_id IS NULL ORDER BY created_at DESC').all();
+    return res.json({ folders, assets });
+  }
+
+  // Viewer: only folders/assets in this directory that are (transitively)
+  // accessible to them.
+  const childFolders = folderId
+    ? db.prepare('SELECT id, name, created_at FROM folders WHERE parent_id = ? ORDER BY name').all(folderId)
+    : db.prepare('SELECT id, name, created_at FROM folders WHERE parent_id IS NULL ORDER BY name').all();
+  const visibleFolders = childFolders.filter((f) => folderContainsAnyAccessible(req.user.id, f.id));
+
+  const childAssets = folderId
+    ? db.prepare('SELECT id, type, title, folder_id, created_at FROM assets WHERE folder_id = ?').all(folderId)
+    : db.prepare('SELECT id, type, title, folder_id, created_at FROM assets WHERE folder_id IS NULL').all();
+  const visibleAssets = childAssets
+    .filter((a) => hasAccessToAsset(req.user, a))
+    .map(({ id, type, title, created_at }) => ({ id, type, title, created_at }));
+
+  res.json({ folders: visibleFolders, assets: visibleAssets });
 });
+
+// Does this folder subtree contain anything (asset or nested folder grant)
+// accessible to the user? Used only to decide whether to show a folder in
+// a viewer's listing when they weren't granted that folder directly but
+// were granted something inside it.
+function folderContainsAnyAccessible(userId, folderId) {
+  if (hasAccessToFolder(userId, folderId)) return true;
+  const assetsHere = db.prepare('SELECT id, folder_id FROM assets WHERE folder_id = ?').all(folderId);
+  if (assetsHere.some((a) => folderAwareHasAccessToAsset(userId, a))) return true;
+  const subfolders = db.prepare('SELECT id FROM folders WHERE parent_id = ?').all(folderId);
+  return subfolders.some((f) => folderContainsAnyAccessible(userId, f.id));
+}
 
 // Step 1: client asks for permission to view a specific asset. Server issues
 // a short-lived, single-asset-scoped token. This is the "signed URL" pattern
 // — the token can't be reused for a different asset and expires quickly.
 router.post('/:id/token', requireAuth, requireAgreement, (req, res) => {
-  const asset = db.prepare('SELECT id FROM assets WHERE id = ?').get(req.params.id);
+  const asset = db.prepare('SELECT id, title, folder_id FROM assets WHERE id = ?').get(req.params.id);
   if (!asset) return res.status(404).json({ error: 'Asset not found' });
-  if (!hasAccessToAsset(req.user, asset.id)) {
+  if (!hasAccessToAsset(req.user, asset)) {
     return res.status(403).json({ error: 'You do not have access to this asset' });
   }
 
   const token = issueAssetToken(req.user.id, asset.id, ASSET_TOKEN_TTL);
-  logAccess(req, req.user.id, asset.id, 'token_issued');
+  logAccess(req, req.user.id, asset.id, 'token_issued', asset.title);
 
   res.json({ token, expiresIn: ASSET_TOKEN_TTL });
 });
@@ -88,7 +119,7 @@ router.get('/:id/content', async (req, res) => {
   const label = `${user.email} • ${new Date().toISOString()}`;
   const absolutePath = path.join(STORAGE_ROOT, asset.file_path);
 
-  logAccess(req, user.id, asset.id, 'content_viewed');
+  logAccess(req, user.id, asset.id, 'content_viewed', asset.title);
 
   try {
     if (asset.type === 'image') {

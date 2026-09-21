@@ -46,18 +46,31 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Folders are hierarchical (parent_id, nullable = root-level). Access
+  -- grants live at the folder level (folder_grants below) — a viewer
+  -- granted a folder implicitly sees everything inside it, including
+  -- subfolders, without needing a grant row for each descendant.
+  CREATE TABLE IF NOT EXISTS folders (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    parent_id TEXT REFERENCES folders(id),
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS assets (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL CHECK (type IN ('image', 'video', 'snippet')),
     title TEXT NOT NULL,
     file_path TEXT NOT NULL,
+    folder_id TEXT REFERENCES folders(id),
     uploaded_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
-  -- Per-user, per-asset access grants. An asset is only listable/viewable
-  -- by a viewer if a row exists here — admins/owner always have implicit
-  -- access to everything they can manage (checked in code, not via a row).
+  -- Per-user, per-asset access grants. Kept for assets at root (no folder)
+  -- or for granting a single asset without granting its whole folder.
+  -- Admins/owner always have implicit access to everything.
   CREATE TABLE IF NOT EXISTS asset_grants (
     user_id INTEGER NOT NULL REFERENCES users(id),
     asset_id TEXT NOT NULL REFERENCES assets(id),
@@ -66,10 +79,28 @@ db.exec(`
     PRIMARY KEY (user_id, asset_id)
   );
 
+  -- Per-user, per-folder access grants. Grants everything in the folder
+  -- and all its subfolders (checked via ancestor walk in code — see
+  -- lib/folders.js — not duplicated as rows per descendant).
+  CREATE TABLE IF NOT EXISTS folder_grants (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    folder_id TEXT NOT NULL REFERENCES folders(id),
+    granted_by INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, folder_id)
+  );
+
+  -- asset_id is deliberately NOT a foreign key: this is the
+  -- leak-traceability record (who viewed what, when) and must survive an
+  -- asset being deleted later — a hard FK would force cascading deletes
+  -- of view history whenever an asset is removed, defeating the point of
+  -- keeping the log. asset_title snapshots the title at view time so the
+  -- log stays human-readable even after the asset row is gone.
   CREATE TABLE IF NOT EXISTS access_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
-    asset_id TEXT NOT NULL REFERENCES assets(id),
+    asset_id TEXT NOT NULL,
+    asset_title TEXT,
     action TEXT NOT NULL,
     ip TEXT,
     user_agent TEXT,
@@ -80,6 +111,57 @@ db.exec(`
     user_id INTEGER PRIMARY KEY REFERENCES users(id),
     accepted_at TEXT NOT NULL DEFAULT (datetime('now')),
     version TEXT NOT NULL
+  );
+
+  -- One row per successful login. Separate from access_log (which is
+  -- asset-view specific) since this is account-level activity the "view
+  -- all who joined/signed in" admin screen reads.
+  CREATE TABLE IF NOT EXISTS login_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    ip TEXT,
+    user_agent TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Last-seen heartbeat for a rough "active now" admin view. Overwritten
+  -- in place (one row per user, not a log) — the client pings periodically
+  -- while the app is open; "online" is derived as "seen within N minutes"
+  -- at read time, not stored as a boolean.
+  CREATE TABLE IF NOT EXISTS user_presence (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id),
+    last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- A viewer's request to open a chat with an admin/owner. Approving a
+  -- request (or an admin messaging a viewer directly, which auto-creates
+  -- an approved thread) opens a chat_threads row; messages then reference
+  -- that thread. One thread per (viewer, admin) pair.
+  CREATE TABLE IF NOT EXISTS chat_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    viewer_id INTEGER NOT NULL REFERENCES users(id),
+    admin_id INTEGER REFERENCES users(id), -- NULL = directed at "any admin"/owner
+    message TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+    reviewed_by INTEGER REFERENCES users(id),
+    reviewed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS chat_threads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    viewer_id INTEGER NOT NULL REFERENCES users(id),
+    admin_id INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (viewer_id, admin_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id INTEGER NOT NULL REFERENCES chat_threads(id),
+    sender_id INTEGER NOT NULL REFERENCES users(id),
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
 
@@ -98,5 +180,7 @@ function ensureColumn(table, column, definition) {
 ensureColumn('users', 'role', "TEXT NOT NULL DEFAULT 'viewer'");
 ensureColumn('users', 'has_master_access', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('assets', 'uploaded_by', 'INTEGER REFERENCES users(id)');
+ensureColumn('assets', 'folder_id', 'TEXT REFERENCES folders(id)');
+ensureColumn('access_log', 'asset_title', 'TEXT');
 
 module.exports = db;

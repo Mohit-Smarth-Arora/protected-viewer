@@ -8,6 +8,7 @@ const authRoutes = require('./routes/auth');
 const assetRoutes = require('./routes/assets');
 const adminRoutes = require('./routes/admin');
 const setupRoutes = require('./routes/setup');
+const chatRoutes = require('./routes/chat');
 
 const app = express();
 
@@ -21,6 +22,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/setup', setupRoutes);
+app.use('/api/chat', chatRoutes);
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 

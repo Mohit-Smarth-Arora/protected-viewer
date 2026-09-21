@@ -83,8 +83,21 @@ class ApiClient {
     return ApiResult.fromResponse(res);
   }
 
-  Future<ApiResult> listAssets() async {
-    final res = await http.get(_uri('/api/assets'), headers: _authHeaders);
+  /// Pinged periodically while the app is open/foregrounded to power the
+  /// admin "active now" view. Fire-and-forget from the caller's side is
+  /// fine — a missed beat just means this user drops out of "online"
+  /// after the server's freshness window.
+  Future<ApiResult> heartbeat() async {
+    final res = await http.post(_uri('/api/auth/heartbeat'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  /// Lists folders + assets inside [folderId] (or the root when null) that
+  /// the current user can see — viewers only see what's been granted
+  /// (directly or via a folder grant), admins/owner see everything.
+  Future<ApiResult> listAssets({String? folderId}) async {
+    final query = folderId != null ? '?folderId=$folderId' : '';
+    final res = await http.get(_uri('/api/assets$query'), headers: _authHeaders);
     return ApiResult.fromResponse(res);
   }
 
@@ -235,6 +248,126 @@ class ApiClient {
     final res = await http.delete(
       _uri('/api/admin/assets/$assetId/grants/$userId'),
       headers: _authHeaders,
+    );
+    return ApiResult.fromResponse(res);
+  }
+
+  // ---- Admin: folders (plain admin and up) -------------------------------
+
+  Future<ApiResult> createFolder({required String name, String? parentId}) async {
+    final res = await http.post(
+      _uri('/api/admin/folders'),
+      headers: _authHeaders,
+      body: jsonEncode({'name': name, 'parentId': ?parentId}),
+    );
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> renameFolder(String folderId, String name) async {
+    final res = await http.patch(
+      _uri('/api/admin/folders/$folderId'),
+      headers: _authHeaders,
+      body: jsonEncode({'name': name}),
+    );
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> deleteFolder(String folderId) async {
+    final res = await http.delete(_uri('/api/admin/folders/$folderId'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> listFolderGrants(String folderId) async {
+    final res = await http.get(_uri('/api/admin/folders/$folderId/grants'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> grantFolder(String folderId, int userId) async {
+    final res = await http.post(
+      _uri('/api/admin/folders/$folderId/grants'),
+      headers: _authHeaders,
+      body: jsonEncode({'userId': userId}),
+    );
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> revokeFolderGrant(String folderId, int userId) async {
+    final res = await http.delete(
+      _uri('/api/admin/folders/$folderId/grants/$userId'),
+      headers: _authHeaders,
+    );
+    return ApiResult.fromResponse(res);
+  }
+
+  // ---- Admin: user activity (plain admin and up) -------------------------
+
+  Future<ApiResult> listAccounts() async {
+    final res = await http.get(_uri('/api/admin/activity/accounts'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> listLoginHistory({int limit = 100}) async {
+    final res = await http.get(_uri('/api/admin/activity/logins?limit=$limit'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> listOnlineNow() async {
+    final res = await http.get(_uri('/api/admin/activity/online'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  // ---- Chat: requests (viewer submits, admin reviews) --------------------
+
+  Future<ApiResult> submitChatRequest({String? message}) async {
+    final res = await http.post(
+      _uri('/api/chat/requests'),
+      headers: _authHeaders,
+      body: jsonEncode({if (message != null && message.isNotEmpty) 'message': message}),
+    );
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> listChatRequests() async {
+    final res = await http.get(_uri('/api/chat/requests'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> approveChatRequest(int requestId) async {
+    final res = await http.post(_uri('/api/chat/requests/$requestId/approve'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> rejectChatRequest(int requestId) async {
+    final res = await http.post(_uri('/api/chat/requests/$requestId/reject'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  // ---- Chat: threads + messages -------------------------------------------
+
+  Future<ApiResult> listChatThreads() async {
+    final res = await http.get(_uri('/api/chat/threads'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> startDirectMessage(int viewerId, String body) async {
+    final res = await http.post(
+      _uri('/api/chat/direct/$viewerId'),
+      headers: _authHeaders,
+      body: jsonEncode({'body': body}),
+    );
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> listThreadMessages(int threadId) async {
+    final res = await http.get(_uri('/api/chat/threads/$threadId/messages'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
+  Future<ApiResult> sendThreadMessage(int threadId, String body) async {
+    final res = await http.post(
+      _uri('/api/chat/threads/$threadId/messages'),
+      headers: _authHeaders,
+      body: jsonEncode({'body': body}),
     );
     return ApiResult.fromResponse(res);
   }

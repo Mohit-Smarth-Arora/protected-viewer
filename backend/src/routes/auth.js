@@ -64,6 +64,12 @@ router.post('/login', async (req, res) => {
     return res.status(401).json({ error: 'Invalid email or password' });
   }
 
+  db.prepare('INSERT INTO login_events (user_id, ip, user_agent) VALUES (?, ?, ?)').run(
+    user.id,
+    req.ip,
+    req.headers['user-agent'] || null
+  );
+
   const token = issueSessionToken(user);
   res.json({ token, user: { id: user.id, email: user.email, displayName: user.display_name } });
 });
@@ -75,6 +81,18 @@ router.get('/me', requireAuth, (req, res) => {
     agreementAccepted: !!agreement && agreement.version === AGREEMENT_VERSION,
     agreementVersion: AGREEMENT_VERSION,
   });
+});
+
+// Heartbeat for the "active now" admin view (routes/admin.js /activity/online).
+// Client calls this periodically while the app is open/foregrounded; "online"
+// is derived at read time as "last_seen_at within N minutes", not stored as
+// a boolean, so there's nothing to explicitly clear on sign-out/close.
+router.post('/heartbeat', requireAuth, (req, res) => {
+  db.prepare(
+    `INSERT INTO user_presence (user_id, last_seen_at) VALUES (?, datetime('now'))
+     ON CONFLICT(user_id) DO UPDATE SET last_seen_at = datetime('now')`
+  ).run(req.user.id);
+  res.json({ ok: true });
 });
 
 router.post('/agreement/accept', requireAuth, (req, res) => {

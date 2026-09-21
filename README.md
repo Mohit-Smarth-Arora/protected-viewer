@@ -28,6 +28,9 @@ Phases:
   for SQLite + assets), frontend on GitHub Pages via GitHub Actions.
 - **Phase 3.5 (done): admin panel** — owner-reviewed admin requests,
   per-user/per-asset access grants, in-app asset upload. See below.
+- **Phase 3.6 (done): folders, messaging, user activity** — Google-Drive-style
+  folders with cascading access grants, an admin/viewer chat system, and an
+  admin view of accounts/sign-ins/who's online. See below.
 - **Next**: tighten CORS to the real Pages origin, invite-only viewer
   signup, video pipeline.
 
@@ -76,6 +79,50 @@ curl -X POST https://your-backend-url/api/setup/owner \
 Unset `SETUP_SECRET` afterward — the route 404s (fully inert) whenever
 `SETUP_SECRET` isn't set, so leaving it unset is the safe default.
 
+## Folders
+
+Folders are hierarchical (like a simple file browser) and access grants
+happen **at the folder level**: granting a viewer a folder gives them
+everything inside it, including subfolders, without needing a grant per
+asset. An asset can still be granted individually if it sits at the root
+(no folder) or you want to share just that one file without sharing its
+whole folder. See `backend/src/lib/folders.js` for the access-check logic
+(`hasAccessToFolder` walks the ancestor chain; a viewer's folder listing
+also shows a folder they weren't granted directly if something inside it
+was).
+
+Both the viewer's browse screen and the admin's manage-assets screen are
+folder browsers with breadcrumb navigation. Admins create/rename/delete
+folders and manage per-folder grants from the manage-assets screen's
+per-folder menu.
+
+## Messaging
+
+Viewers **request** a chat from the account menu ("Message an admin") —
+an optional message, no identity form. Any admin (or master-access/owner)
+sees pending requests under "Chat requests" and can approve (opening a
+thread) or reject. Admins can also message a specific viewer directly with
+no request needed, either from "Users & activity" → accounts tab, or once
+a thread exists, from "Messages". There's no viewer-to-viewer messaging.
+
+Threads are simple request/response, refreshed by pull-to-refresh or on
+sending a message — not real-time/websocket-based, kept deliberately
+simple for now.
+
+## User activity (admin-only)
+
+"Users & activity" has three tabs:
+- **Accounts** — every registered account, role, and join date. Tap the
+  chat icon next to a viewer to message them directly.
+- **Sign-in history** — a log of every successful login (`login_events`
+  table), most recent first.
+- **Active now** — accounts with a heartbeat in the last 2 minutes
+  (`user_presence` table + `ONLINE_WINDOW_MINUTES` in
+  `backend/src/routes/admin.js`). The Flutter client pings
+  `POST /api/auth/heartbeat` every 45s while signed in
+  (`frontend/lib/state/session.dart`); this is an approximation, not a
+  websocket-based live presence system.
+
 ## Repo layout
 
 ```
@@ -94,6 +141,7 @@ backend/
       fonts.js                Must load before 'sharp' — bundles fonts so rendering
                                doesn't depend on host OS fonts (see git history)
       bootstrap.js             Seeds a fresh empty storage volume on first boot
+      folders.js               Folder access-check logic (ancestor-chain grant walk)
     middleware/
       requireAuth.js          Verifies session JWT
       requireAgreement.js     Blocks access until click-through agreement accepted
@@ -101,8 +149,12 @@ backend/
       requireMasterAccess.js   owner, or admin with has_master_access
     routes/
       auth.js                  /register /login /me /agreement/accept /admin-request
-      assets.js                 /assets, /assets/:id/token, /assets/:id/content
-      admin.js                  Request review, admin management, asset upload/grants
+                                /heartbeat
+      assets.js                 /assets (folder-aware listing), /assets/:id/token,
+                                 /assets/:id/content
+      admin.js                  Request review, admin management, folders, asset
+                                 upload/grants, user activity (accounts/logins/online)
+      chat.js                   Chat requests, threads, messages
       setup.js                  One-time owner bootstrap (see above), inert by default
   assets/                   Asset source files (sample.png/sample.py tracked;
                              anything else here — real uploads — is gitignored)
@@ -115,12 +167,16 @@ backend/
 frontend/                  Flutter app (web + android platforms scaffolded)
   lib/
     api/api_client.dart      Talks to the backend; no security logic of its own
-    state/session.dart       Auth/role/agreement status, session token (in-memory)
+    state/session.dart       Auth/role/agreement status, session token (in-memory),
+                              heartbeat timer while signed in
     screens/
-      login_screen.dart, agreement_screen.dart, asset_list_screen.dart,
-      asset_viewer_screen.dart, admin_request_screen.dart,
-      admin_review_screen.dart, manage_admins_screen.dart,
-      manage_assets_screen.dart
+      login_screen.dart, agreement_screen.dart, asset_list_screen.dart
+        (folder browser w/ breadcrumbs), asset_viewer_screen.dart,
+      admin_request_screen.dart, admin_review_screen.dart,
+      manage_admins_screen.dart, manage_assets_screen.dart
+        (folder browser + folder/asset CRUD + grants),
+      user_activity_screen.dart (accounts/logins/online tabs),
+      chat_screens.dart (request, review, threads, conversation)
     widgets/
       protected_image_view.dart  Canvas-painted image renderer (not Image/<img>,
                                    no long-press/right-click save affordance) —

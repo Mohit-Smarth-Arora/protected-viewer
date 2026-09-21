@@ -1,5 +1,12 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../api/api_client.dart';
+
+// How often to ping the server while signed in, to power the admin
+// "active now" view (backend/src/routes/admin.js ONLINE_WINDOW_MINUTES).
+// Comfortably shorter than that window so a normal session never drops out
+// of "online" between heartbeats.
+const _heartbeatInterval = Duration(seconds: 45);
 
 // `unknown` is reserved for when session restoration (e.g. "remember me")
 // is added — it would be the "checking stored token" transient state.
@@ -25,6 +32,7 @@ class Session extends ChangeNotifier {
   String role = 'viewer'; // 'viewer' | 'admin' | 'owner', set from /me
   bool hasMasterAccess = false;
   String? _lastError;
+  Timer? _heartbeatTimer;
 
   String? get lastError => _lastError;
   bool get isAdmin => role == 'admin' || role == 'owner';
@@ -84,7 +92,21 @@ class Session extends ChangeNotifier {
 
     final accepted = meRes.body['agreementAccepted'] == true;
     status = accepted ? AuthStatus.signedIn : AuthStatus.signedInNeedsAgreement;
+    if (status == AuthStatus.signedIn) {
+      _startHeartbeat();
+    }
     notifyListeners();
+  }
+
+  void _startHeartbeat() {
+    if (_heartbeatTimer != null) return; // already running
+    api.heartbeat(); // fire immediately, then on the interval
+    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) => api.heartbeat());
+  }
+
+  void _stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
   }
 
   /// Re-pulls /me without changing auth flow state — used after actions
@@ -103,6 +125,7 @@ class Session extends ChangeNotifier {
   }
 
   void signOut() {
+    _stopHeartbeat();
     api.setSessionToken(null);
     userId = null;
     userEmail = null;
@@ -111,5 +134,11 @@ class Session extends ChangeNotifier {
     hasMasterAccess = false;
     status = AuthStatus.signedOut;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _stopHeartbeat();
+    super.dispose();
   }
 }
