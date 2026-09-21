@@ -6,6 +6,7 @@ const requireAuth = require('../middleware/requireAuth');
 const requireAgreement = require('../middleware/requireAgreement');
 const { issueAssetToken, verifyAssetToken } = require('../lib/auth');
 const { watermarkImage, watermarkCodeSnippet } = require('../lib/watermark');
+const { STORAGE_ROOT } = require('../lib/paths');
 
 const router = express.Router();
 const ASSET_TOKEN_TTL = parseInt(process.env.ASSET_TOKEN_TTL_SECONDS || '120', 10);
@@ -60,7 +61,7 @@ router.get('/:id/content', async (req, res) => {
   if (!user) return res.status(401).json({ error: 'User no longer exists' });
 
   const label = `${user.email} • ${new Date().toISOString()}`;
-  const absolutePath = path.join(__dirname, '..', '..', asset.file_path);
+  const absolutePath = path.join(STORAGE_ROOT, asset.file_path);
 
   logAccess(req, user.id, asset.id, 'content_viewed');
 

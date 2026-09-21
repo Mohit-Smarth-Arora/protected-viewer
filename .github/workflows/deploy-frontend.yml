@@ -1,0 +1,58 @@
+name: Deploy frontend to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: frontend
+        run: flutter analyze
+
+      - name: Test
+        working-directory: frontend
+        run: flutter test
+
+      - name: Build web
+        working-directory: frontend
+        # Repo is served at https://<user>.github.io/<repo>/ (a project site,
+        # not a user/org root site) so base-href must match the subpath or
+        # asset/script loading breaks. BACKEND_URL is baked in at build time
+        # via --dart-define; see lib/main.dart.
+        run: |
+          flutter build web \
+            --base-href "/${{ github.event.repository.name }}/" \
+            --dart-define=BACKEND_URL=${{ vars.BACKEND_URL }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/build/web
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

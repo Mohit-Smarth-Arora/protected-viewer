@@ -6,9 +6,13 @@ import 'app.dart';
 
 void main() {
   final api = ApiClient(
-    // Points at the local backend from backend/README.md. Move this to a
-    // build-time config (--dart-define) before deploying anywhere real.
-    baseUrl: 'http://localhost:4000',
+    // Defaults to the local backend for `flutter run` during development.
+    // Deployed builds set this via --dart-define=BACKEND_URL=... (see
+    // .github/workflows/deploy-frontend.yml).
+    baseUrl: const String.fromEnvironment(
+      'BACKEND_URL',
+      defaultValue: 'http://localhost:4000',
+    ),
   );
 
   runApp(

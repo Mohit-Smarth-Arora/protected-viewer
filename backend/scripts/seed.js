@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const { nanoid } = require('nanoid');
 const db = require('../src/lib/db');
+const { STORAGE_ROOT } = require('../src/lib/paths');
 
 const samples = [
   { type: 'image', title: 'Sample Screenshot', file_path: 'assets/images/sample.png' },
@@ -18,7 +19,7 @@ const insert = db.prepare(
 );
 
 for (const sample of samples) {
-  const absolutePath = path.join(__dirname, '..', sample.file_path);
+  const absolutePath = path.join(STORAGE_ROOT, sample.file_path);
   if (!fs.existsSync(absolutePath)) {
     console.warn(`Skipping "${sample.title}" — file not found at ${absolutePath}`);
     continue;
