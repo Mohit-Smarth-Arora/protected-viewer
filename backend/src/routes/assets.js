@@ -14,10 +14,10 @@ const { hasAccessToAsset: folderAwareHasAccessToAsset, hasAccessToFolder } = req
 const router = express.Router();
 const ASSET_TOKEN_TTL = parseInt(process.env.ASSET_TOKEN_TTL_SECONDS || '120', 10);
 
-function logAccess(req, userId, assetId, action, assetTitle) {
+function logAccess(req, userId, assetId, action, assetTitle, userEmail) {
   db.prepare(
-    'INSERT INTO access_log (user_id, asset_id, asset_title, action, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(userId, assetId, assetTitle || null, action, req.ip, req.headers['user-agent'] || null);
+    'INSERT INTO access_log (user_id, user_email, asset_id, asset_title, action, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(userId, userEmail || null, assetId, assetTitle || null, action, req.ip, req.headers['user-agent'] || null);
 }
 
 // Admins/owner implicitly see and can request tokens for everything (they
@@ -88,7 +88,7 @@ router.post('/:id/token', requireAuth, requireActiveAccount, requireAgreement, (
   }
 
   const token = issueAssetToken(req.user.id, asset.id, ASSET_TOKEN_TTL);
-  logAccess(req, req.user.id, asset.id, 'token_issued', asset.title);
+  logAccess(req, req.user.id, asset.id, 'token_issued', asset.title, req.user.email);
 
   res.json({ token, expiresIn: ASSET_TOKEN_TTL });
 });
@@ -120,7 +120,7 @@ router.get('/:id/content', async (req, res) => {
   const label = `${user.email} • ${new Date().toISOString()}`;
   const absolutePath = path.join(STORAGE_ROOT, asset.file_path);
 
-  logAccess(req, user.id, asset.id, 'content_viewed', asset.title);
+  logAccess(req, user.id, asset.id, 'content_viewed', asset.title, user.email);
 
   try {
     if (asset.type === 'image') {

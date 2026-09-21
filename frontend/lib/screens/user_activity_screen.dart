@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/api_client.dart';
+import '../state/session.dart';
 import 'chat_screens.dart';
 
 /// Admin-only (plain admin and up): three tabs — all accounts, sign-in
@@ -127,6 +128,43 @@ class _AccountsTabState extends State<_AccountsTab> {
     }
   }
 
+  Future<void> _deleteAccount(BuildContext context, Map<String, dynamic> account) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Delete ${account['display_name']}?'),
+        content: Text(
+          'This permanently deletes the account (${account['email']}). Content they uploaded or '
+          'created is kept, but their access grants, chat history, and login history are removed. '
+          'This cannot be undone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(dialogContext).colorScheme.error),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    final api = context.read<ApiClient>();
+    final res = await api.deleteUser(account['id'] as int);
+    if (!context.mounted) return;
+    if (res.ok) {
+      _load();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Deleted ${account['email']}')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res.error ?? 'Could not delete account')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_error != null) return Center(child: Text(_error!));
@@ -159,6 +197,7 @@ class _AccountsTabState extends State<_AccountsTab> {
                     itemBuilder: (context, i) {
                       final a = filtered[i];
                       final role = a['role'] as String;
+                      final canDelete = role != 'owner' && context.watch<Session>().effectiveMasterAccess;
                       return ListTile(
                         leading: Icon(switch (role) {
                           'owner' => Icons.workspace_premium,
@@ -167,13 +206,25 @@ class _AccountsTabState extends State<_AccountsTab> {
                         }),
                         title: Text(a['display_name'] as String),
                         subtitle: Text('${a['email']} • joined ${a['created_at']}'),
-                        trailing: role == 'viewer'
-                            ? IconButton(
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (role == 'viewer')
+                              IconButton(
                                 icon: const Icon(Icons.chat_bubble_outline),
                                 tooltip: 'Message',
                                 onPressed: () => _messageViewer(context, a),
                               )
-                            : Chip(label: Text(role)),
+                            else
+                              Chip(label: Text(role)),
+                            if (canDelete)
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline),
+                                tooltip: 'Delete account',
+                                onPressed: () => _deleteAccount(context, a),
+                              ),
+                          ],
+                        ),
                       );
                     },
                   ),

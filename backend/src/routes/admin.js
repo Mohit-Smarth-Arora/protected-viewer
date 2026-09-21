@@ -403,6 +403,71 @@ router.get('/activity/online', (req, res) => {
   res.json({ online: rows, windowMinutes: ONLINE_WINDOW_MINUTES });
 });
 
+// ---- Deleting an account (master access only) ---------------------------
+// Destructive and hard to reverse, so gated at the top tier rather than
+// plain admin. Policy (see roadmap discussion this was designed against):
+//   - Owner cannot be deleted via this route at all.
+//   - Content this user created (assets, folders, referral codes) is kept
+//     intact; only the "who created/uploaded this" attribution is cleared
+//     (set to NULL) — removing an account should not remove content other
+//     people may still depend on.
+//   - access_log rows are kept (traceability record must survive the
+//     account that generated them — same principle as asset deletion).
+//     user_email was already snapshotted at write time; nothing more to do.
+//   - Everything that only makes sense in the context of this specific
+//     account (grants, pending requests, agreements, presence, login
+//     history, verification codes, chat threads/messages/requests
+//     involving them) is deleted outright.
+router.delete('/users/:id', requireMasterAccess, (req, res) => {
+  const targetId = parseInt(req.params.id, 10);
+  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
+  if (!target) return res.status(404).json({ error: 'User not found' });
+  if (target.role === 'owner') {
+    return res.status(400).json({ error: 'Owner cannot be deleted' });
+  }
+
+  const deleteTx = db.transaction(() => {
+    // Detach content ownership rather than deleting the content itself.
+    db.prepare('UPDATE referral_codes SET created_by = NULL WHERE created_by = ?').run(targetId);
+    db.prepare('UPDATE folders SET created_by = NULL WHERE created_by = ?').run(targetId);
+    db.prepare('UPDATE assets SET uploaded_by = NULL WHERE uploaded_by = ?').run(targetId);
+
+    // Detach review attribution on requests reviewed BY this user (the
+    // request itself, and its outcome, still stand — only "who reviewed
+    // it" is cleared) rather than deleting those historical decisions.
+    db.prepare('UPDATE admin_requests SET reviewed_by = NULL WHERE reviewed_by = ?').run(targetId);
+    db.prepare('UPDATE signup_requests SET reviewed_by = NULL WHERE reviewed_by = ?').run(targetId);
+    db.prepare('UPDATE chat_requests SET reviewed_by = NULL WHERE reviewed_by = ?').run(targetId);
+
+    // Rows that only make sense tied to this specific account.
+    db.prepare('DELETE FROM email_verification_codes WHERE user_id = ?').run(targetId);
+    db.prepare('DELETE FROM asset_grants WHERE user_id = ? OR granted_by = ?').run(targetId, targetId);
+    db.prepare('DELETE FROM folder_grants WHERE user_id = ? OR granted_by = ?').run(targetId, targetId);
+    db.prepare('DELETE FROM agreements WHERE user_id = ?').run(targetId);
+    db.prepare('DELETE FROM login_events WHERE user_id = ?').run(targetId);
+    db.prepare('DELETE FROM user_presence WHERE user_id = ?').run(targetId);
+    db.prepare('DELETE FROM admin_requests WHERE user_id = ?').run(targetId);
+    db.prepare('DELETE FROM signup_requests WHERE user_id = ?').run(targetId);
+    db.prepare('DELETE FROM chat_requests WHERE viewer_id = ? OR admin_id = ?').run(targetId, targetId);
+
+    // Chat threads involving this user: delete their messages, then the
+    // threads themselves (a thread with one side gone has no one left to
+    // read it).
+    const threads = db
+      .prepare('SELECT id FROM chat_threads WHERE viewer_id = ? OR admin_id = ?')
+      .all(targetId, targetId);
+    for (const thread of threads) {
+      db.prepare('DELETE FROM messages WHERE thread_id = ?').run(thread.id);
+    }
+    db.prepare('DELETE FROM chat_threads WHERE viewer_id = ? OR admin_id = ?').run(targetId, targetId);
+
+    db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
+  });
+  deleteTx();
+
+  res.json({ ok: true, deletedUserId: targetId, deletedEmail: target.email });
+});
+
 router.get('/assets/:id/grants', (req, res) => {
   const rows = db
     .prepare(

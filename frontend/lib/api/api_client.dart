@@ -371,6 +371,15 @@ class ApiClient {
     return ApiResult.fromResponse(res);
   }
 
+  /// Master-access only. Deletes a non-owner account. Content they created
+  /// (assets, folders, referral codes) is kept, only ownership attribution
+  /// is cleared server-side — see backend/src/routes/admin.js for the
+  /// full deletion policy.
+  Future<ApiResult> deleteUser(int userId) async {
+    final res = await http.delete(_uri('/api/admin/users/$userId'), headers: _authHeaders);
+    return ApiResult.fromResponse(res);
+  }
+
   // ---- Chat: requests (viewer submits, admin reviews) --------------------
 
   Future<ApiResult> submitChatRequest({String? message}) async {

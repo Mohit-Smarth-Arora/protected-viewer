@@ -138,10 +138,15 @@ db.exec(`
   -- asset being deleted later — a hard FK would force cascading deletes
   -- of view history whenever an asset is removed, defeating the point of
   -- keeping the log. asset_title snapshots the title at view time so the
-  -- log stays human-readable even after the asset row is gone.
+  -- log stays human-readable even after the asset row is gone. user_id is
+  -- likewise NOT a foreign key, for the same reason: deleting a user's
+  -- account (see routes/admin.js DELETE /users/:id) must not erase the
+  -- record of what they viewed. user_email is snapshotted at delete time
+  -- so the log stays attributable even once the account is gone.
   CREATE TABLE IF NOT EXISTS access_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL REFERENCES users(id),
+    user_id INTEGER NOT NULL,
+    user_email TEXT,
     asset_id TEXT NOT NULL,
     asset_title TEXT,
     action TEXT NOT NULL,
@@ -231,6 +236,7 @@ ensureColumn('users', 'has_master_access', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('assets', 'uploaded_by', 'INTEGER REFERENCES users(id)');
 ensureColumn('assets', 'folder_id', 'TEXT REFERENCES folders(id)');
 ensureColumn('access_log', 'asset_title', 'TEXT');
+ensureColumn('access_log', 'user_email', 'TEXT');
 const emailVerifiedColumnIsNew = ensureColumn('users', 'email_verified', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('users', 'signup_status', "TEXT NOT NULL DEFAULT 'active'");
 
@@ -243,5 +249,16 @@ ensureColumn('users', 'signup_status', "TEXT NOT NULL DEFAULT 'active'");
 if (emailVerifiedColumnIsNew) {
   db.prepare("UPDATE users SET email_verified = 1, signup_status = 'active'").run();
 }
+
+// Best-effort backfill: fill in user_email for existing access_log rows
+// from the still-live users table, wherever the account hasn't been
+// deleted yet. Harmless to re-run (only touches rows where it's still
+// NULL); rows for already-deleted users stay NULL, same as if they'd been
+// deleted after this ran.
+db.exec(`
+  UPDATE access_log
+  SET user_email = (SELECT email FROM users WHERE users.id = access_log.user_id)
+  WHERE user_email IS NULL
+`);
 
 module.exports = db;

@@ -167,6 +167,33 @@ simple for now.
   (`frontend/lib/state/session.dart`); this is an approximation, not a
   websocket-based live presence system.
 
+### Deleting an account
+
+Owner/master-access admins can delete a non-owner account from the
+Accounts tab (`DELETE /api/admin/users/:id`). This is destructive and hard
+to reverse, so it's gated at the master-access tier, not plain admin.
+Policy:
+- **Owner** can never be deleted via this route.
+- **Content the deleted user created or uploaded** (assets, folders,
+  referral codes) is **kept** — only the "created by"/"uploaded by"
+  attribution is cleared to `NULL`. Deleting an admin's account doesn't
+  remove content other people may still have access to.
+- **`access_log` rows are kept** — the leak-traceability record must
+  survive the account that generated it, same principle as asset deletion
+  (see below). The viewer's email is snapshotted into `access_log.user_email`
+  at write time, so the log stays attributable after the account is gone.
+- Everything that only makes sense tied to that specific account (grants,
+  pending admin/signup/chat requests, chat threads and their messages,
+  agreements, login history, verification codes, presence) is deleted
+  outright.
+
+Verified by direct testing: a viewer with a grant, view history, an
+approved chat thread, and messages was deleted, and the access log
+survived (with email intact) while everything else specific to that
+account was removed; a separate admin who'd created a folder and uploaded
+an asset was deleted, and both survived with `created_by`/`uploaded_by`
+set to `null`.
+
 ## Repo layout
 
 ```
