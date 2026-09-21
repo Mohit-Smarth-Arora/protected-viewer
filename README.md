@@ -2,7 +2,14 @@
 
 A web-first (Flutter Web → Android → optional iOS) app for sharing screenshots,
 video, and Python code with people who should be able to **view** but not
-**freely copy or redistribute** the content.
+**freely copy or redistribute** the content. Access is admin-controlled:
+an owner approves admins, admins upload assets and grant specific viewers
+access to specific assets.
+
+**Live deployment:**
+- Frontend: https://mohit-smarth-arora.github.io/protected-viewer/
+- Backend API: https://protected-viewer-backend-production.up.railway.app
+- Repo: https://github.com/Mohit-Smarth-Arora/protected-viewer
 
 ## Threat model (read this first)
 
@@ -11,76 +18,141 @@ platforms (web/Android/iOS) a determined viewer can always photograph the
 screen. The design goal is: stop casual copy/redistribution, and make any
 leak traceable back to the specific person and moment it came from.
 
-See project memory / prior discussion for the full roadmap and phase
-breakdown. Short version:
+Phases:
+- **Phase 1 (done): backend core** — auth, per-asset short-lived signed
+  tokens, server-side watermarking, access logging. All security-critical
+  logic lives here, not in the client.
+- **Phase 2 (done): Flutter Web client** — thin renderer only, no security
+  decisions of its own.
+- **Phase 3 (done): real hosting** — backend on Railway (persistent volume
+  for SQLite + assets), frontend on GitHub Pages via GitHub Actions.
+- **Phase 3.5 (done): admin panel** — owner-reviewed admin requests,
+  per-user/per-asset access grants, in-app asset upload. See below.
+- **Next**: tighten CORS to the real Pages origin, invite-only viewer
+  signup, video pipeline.
 
-- **Phase 1 (done): backend core** — auth, per-asset short-lived
-  signed tokens, server-side watermarking (images + code snippets rendered
-  as watermarked images), access logging. All security-critical logic lives
-  here, not in the client.
-- **Phase 2 (done): Flutter Web client** — thin renderer only. Login,
-  click-through agreement, asset browser, and a canvas-painted viewer for
-  watermarked images/snippets. Makes no security decisions itself — see
-  `frontend/README section` below.
-- **Phase 3+**: real hosting, Android port, optional iOS, optional video DRM
-  upgrade. See roadmap for details.
+## Roles
+
+- **viewer** (default on signup): sees only assets an admin has explicitly
+  granted them. No admin powers.
+- **admin**: can upload assets (image/Python snippet) and manage which
+  viewers can see which assets. Approved by the owner or a master-access
+  admin, via an in-app request form.
+- **admin + master access**: everything a plain admin can do, plus can
+  review/approve/reject admin requests and toggle master access on other
+  admins. Off by default when an admin is approved — the owner grants it
+  explicitly, per admin, and can revoke it later.
+- **owner**: exactly one account (you). Implicit master access. Cannot be
+  demoted or have its access modified via the API.
+
+### Becoming an admin
+
+Any signed-in viewer can request admin access from the account menu
+(top-right, "Request admin access"). The form collects full legal name,
+phone number, organization (optional), a reason, and a passport-size photo
+— submitted as a pending request. An owner/master-access admin reviews it
+in-app ("Review admin requests"), views the photo, and approves (choosing
+whether to also grant master access) or rejects.
+
+### Promoting the owner account
+
+There's exactly one owner. Two ways to set it:
+
+**Locally** (has direct filesystem/DB access):
+```bash
+cd backend
+node scripts/seed_owner.js you@example.com [password] [displayName]
+# omit password/displayName if the account already exists — it just
+# promotes the existing account's role to 'owner'
+```
+
+**On a deploy without shell access** (e.g. Railway without SSH set up):
+temporarily set the `SETUP_SECRET` env var on the platform, then:
+```bash
+curl -X POST https://your-backend-url/api/setup/owner \
+  -H "Content-Type: application/json" \
+  -d '{"secret":"<SETUP_SECRET value>","email":"you@example.com"}'
+```
+Unset `SETUP_SECRET` afterward — the route 404s (fully inert) whenever
+`SETUP_SECRET` isn't set, so leaving it unset is the safe default.
 
 ## Repo layout
 
 ```
 backend/
   src/
-    app.js              Express app wiring
-    server.js            Entry point
+    app.js                 Express app wiring, multer error handling
+    server.js               Entry point
     lib/
-      db.js               SQLite schema (users, assets, access_log, agreements)
-      auth.js             Password hashing, session JWTs, per-asset signed tokens
-      watermark.js         Server-side image & code-snippet watermarking (sharp)
+      db.js                  SQLite schema + forward-compatible column migrations
+      auth.js                Password hashing, session JWTs, per-asset signed tokens
+      permissions.js          Role logic: isAdmin / hasMasterAccess / canManageAdmins
+      paths.js                STORAGE_ROOT-based paths (data/assets/admin_photos)
+      uploads.js              multer config for admin photos + asset uploads
+      watermark.js            Server-side image & code-snippet watermarking (sharp),
+                               always appends the ownership line to every render
+      fonts.js                Must load before 'sharp' — bundles fonts so rendering
+                               doesn't depend on host OS fonts (see git history)
+      bootstrap.js             Seeds a fresh empty storage volume on first boot
     middleware/
-      requireAuth.js       Verifies session JWT
-      requireAgreement.js  Blocks access until click-through agreement accepted
+      requireAuth.js          Verifies session JWT
+      requireAgreement.js     Blocks access until click-through agreement accepted
+      requireAdmin.js          role in (admin, owner)
+      requireMasterAccess.js   owner, or admin with has_master_access
     routes/
-      auth.js              /register /login /me /agreement/accept
-      assets.js             /assets, /assets/:id/token, /assets/:id/content
-  assets/                 Local asset files (gitignored contents in practice;
-                          sample placeholders included for testing)
-  data/                   SQLite DB file (gitignored)
-  scripts/seed.js         Registers sample assets from backend/assets/
+      auth.js                  /register /login /me /agreement/accept /admin-request
+      assets.js                 /assets, /assets/:id/token, /assets/:id/content
+      admin.js                  Request review, admin management, asset upload/grants
+      setup.js                  One-time owner bootstrap (see above), inert by default
+  assets/                   Asset source files (sample.png/sample.py tracked;
+                             anything else here — real uploads — is gitignored)
+  admin_photos/             Admin-request verification photos (gitignored entirely)
+  data/                     SQLite DB file (gitignored)
+  scripts/
+    seed.js                  Registers the sample assets
+    seed_owner.js             Promotes/creates the one owner account
 
-frontend/                Flutter app (web + android platforms scaffolded)
+frontend/                  Flutter app (web + android platforms scaffolded)
   lib/
-    api/api_client.dart     Talks to the backend; no security logic of its own
-    state/session.dart      Auth/agreement status, session token (in-memory only)
-    screens/                Login, agreement gate, asset list, asset viewer
+    api/api_client.dart      Talks to the backend; no security logic of its own
+    state/session.dart       Auth/role/agreement status, session token (in-memory)
+    screens/
+      login_screen.dart, agreement_screen.dart, asset_list_screen.dart,
+      asset_viewer_screen.dart, admin_request_screen.dart,
+      admin_review_screen.dart, manage_admins_screen.dart,
+      manage_assets_screen.dart
     widgets/
       protected_image_view.dart  Canvas-painted image renderer (not Image/<img>,
                                    no long-press/right-click save affordance) —
                                    UX friction, not real security; see threat
                                    model above
+
+.github/workflows/deploy-frontend.yml   Builds + deploys frontend to GitHub Pages
 ```
 
 ## How the security model works
 
 1. Client logs in → gets a session JWT (`/api/auth/login`).
-2. Client must accept the no-redistribution agreement once
-   (`/api/auth/agreement/accept`) before any asset route works.
+2. Client must accept the no-redistribution agreement once before any asset
+   route works.
 3. To view an asset, client first requests a **short-lived, single-asset**
-   token (`POST /api/assets/:id/token`, ~2 min TTL by default). This token is
-   useless for any other asset and expires quickly, so it can't usefully be
-   bookmarked or shared.
-4. Client fetches content with that token
-   (`GET /api/assets/:id/content?token=...`). The server **always**
-   watermarks before sending — images get a tiled diagonal watermark with the
-   viewer's email + exact timestamp baked into the pixels; Python snippets
-   are rendered to a watermarked PNG server-side, so raw source text never
-   leaves the server.
-5. Every token issuance and every content fetch is written to `access_log`
-   (user, asset, timestamp, IP, user agent) — this is the traceability net
-   if something leaks.
+   token (`POST /api/assets/:id/token`, ~2 min TTL). Viewers only get a
+   token for assets explicitly granted to them (`asset_grants` table);
+   admins/owner can request a token for anything. The token is useless for
+   any other asset and expires quickly.
+4. Client fetches content with that token. The server **always**
+   watermarks before sending — every image and code-snippet render gets a
+   tiled diagonal watermark with the viewer's email, the exact timestamp,
+   and "Solely Owned by Mohit Smarth Arora" baked into the pixels
+   server-side. Raw source (e.g. `.py` text) never leaves the server.
+5. Every token issuance and content fetch is logged (`access_log`: user,
+   asset, timestamp, IP, user agent) — the traceability net if something
+   leaks.
 
-There is **no route that serves a raw file** — this was verified directly
-(no token / bad token / token-for-wrong-asset / direct static path are all
-rejected).
+There is **no route that serves a raw file** to a viewer. Admin-request
+verification photos are the one exception, served unwatermarked but only
+to master-access accounts, for manual identity review — never exposed
+through the public asset routes.
 
 ## Running locally
 
@@ -89,6 +161,7 @@ cd backend
 cp .env.example .env        # then edit JWT_SECRET to a long random value
 npm install
 node scripts/seed.js        # registers sample assets from backend/assets/
+node scripts/seed_owner.js you@example.com yourpassword123 "Your Name"
 npm run dev                 # or: npm start
 ```
 
@@ -99,8 +172,8 @@ In a second terminal:
 ```bash
 cd frontend
 flutter pub get
-flutter run -d chrome     # requires CHROME_EXECUTABLE set if Chrome isn't
-                           # on PATH as `google-chrome` — see setup notes below
+flutter run -d chrome     # requires CHROME_EXECUTABLE if Chrome isn't on
+                           # PATH as `google-chrome` — see setup notes below
 ```
 
 ### First-time Flutter/Chrome setup on this machine
@@ -108,25 +181,36 @@ flutter run -d chrome     # requires CHROME_EXECUTABLE set if Chrome isn't
 - Flutter SDK installed via `git clone -b stable https://github.com/flutter/flutter.git ~/flutter`,
   with `~/flutter/bin` added to `PATH` in `~/.bashrc`.
 - Chrome: this machine only has `chromium` (snap), not `google-chrome`, so
-  `CHROME_EXECUTABLE=/snap/bin/chromium` is set in `~/.bashrc` so Flutter can
-  find it for `flutter run -d chrome`.
+  `CHROME_EXECUTABLE=/snap/bin/chromium` is set in `~/.bashrc`.
 - Android toolchain (cmdline-tools, `ANDROID_HOME`) is **not** set up yet —
-  deferred to Phase 4 per the roadmap, since web is priority #1.
+  deferred, since web is priority #1.
+
+## Deployment
+
+- **Backend (Railway)**: deployed via `railway up` from `backend/`. Env vars
+  set on Railway: `JWT_SECRET`, `JWT_EXPIRES_IN`, `ASSET_TOKEN_TTL_SECONDS`,
+  `NODE_ENV=production`, `STORAGE_ROOT=/app/storage`. A persistent volume is
+  mounted at `/app/storage` (holds `data/`, `assets/`, `admin_photos/` — the
+  one volume Railway allows per service, so all three share it via
+  `STORAGE_ROOT`). On a fresh empty volume, `bootstrap.js` seeds the sample
+  assets automatically on first boot.
+- **Frontend (GitHub Pages)**: `.github/workflows/deploy-frontend.yml` builds
+  on push to `main` (when `frontend/**` changes) and deploys automatically.
+  `BACKEND_URL` is a repo variable baked in at build time via
+  `--dart-define`. Base href is set to `/protected-viewer/` since Pages
+  serves this as a project site, not a root domain.
 
 ## Before sharing this with real outside viewers (not yet done)
 
 - Switch `/api/auth/register` from open self-signup to invite-only account
-  creation — open signup defeats "not full access to just anyone."
-- Tighten CORS from `cors()` (wide open) to your actual Flutter web origin.
-- Move `JWT_SECRET` and all secrets out of `.env` into real secret management
-  for any non-local deployment.
-- Video watermarking/streaming is not implemented yet (Phase 1 covered
-  images + snippets first, per the roadmap) — the `/content` route currently
-  returns 501 for video assets.
+  creation, or otherwise gate who can create viewer accounts at all.
+- Tighten CORS from `cors()` (wide open) to the real Pages origin.
+- Video watermarking/streaming is not implemented yet — `/content` returns
+  501 for video assets.
 - Session token is in-memory only in the Flutter client (lost on page
   refresh) — deliberate for now; add persistence later as a considered
   decision, not a default.
 - `ProtectedImageView`'s gesture-blocking (no long-press/right-click save) is
-  UX friction only, not a security boundary — see threat model at the top of
-  this file. The real protection is that bytes are already watermarked
-  server-side before they reach the client.
+  UX friction only, not a security boundary — see threat model above. The
+  real protection is that bytes are already watermarked server-side before
+  they reach the client.
