@@ -291,8 +291,9 @@ frontend/                  Flutter app (web + android platforms scaffolded)
    any other asset and expires quickly.
 4. Client fetches content with that token. The server **always**
    watermarks before sending — every image and code-snippet render gets a
-   tiled diagonal watermark with the viewer's email, the exact timestamp,
-   and "Solely Owned by Mohit Smarth Arora" baked into the pixels
+   tiled diagonal watermark with the viewer's email, the exact timestamp
+   (Indian Standard Time — `lib/time.js`), and "Solely Owned by Mohit
+   Smarth Arora" baked into the pixels
    server-side. Raw source (e.g. `.py` text) never leaves the server.
 5. Every token issuance and content fetch is logged (`access_log`: user,
    asset, timestamp, IP, user agent) — the traceability net if something
@@ -316,9 +317,9 @@ What HTML assets still get:
 - The same access-control and short-lived-token gating as every other
   asset — no route serves an HTML asset's content without a valid,
   asset-scoped token.
-- A watermark overlay (viewer email + timestamp + the ownership line)
-  injected into the HTML itself server-side, per request, right before
-  `</body>` (`lib/watermark.js` `injectWatermarkIntoHtml`) — visible DOM,
+- A watermark overlay (viewer email + timestamp in IST + the ownership
+  line) injected into the HTML itself server-side, per request, right
+  before `</body>` (`lib/watermark.js` `prepareHtmlAsset`) — visible DOM,
   not baked pixels, so it deters casual screenshotting/redistribution and
   keeps every view attributable, but is removable via devtools by anyone
   who goes looking.
@@ -329,6 +330,13 @@ What HTML assets still get:
   folder grant (rather than a direct per-asset grant) or as an admin/owner
   always watermarks — the no-watermark exception is opt-in per viewer,
   never implicit.
+- Pinch/trackpad zoom and Ctrl+scroll-wheel zoom are disabled *inside the
+  embedded page's content* (`touch-action` + a `wheel` listener, injected
+  unconditionally regardless of the watermark toggle above) — those
+  gestures were zooming the page's own layout and visibly breaking it
+  inside the app's iframe. The browser's own zoom (Ctrl +/-/0, the
+  browser's own pinch-zoom, view menu) is untouched — that's outside the
+  page entirely and was intentionally left working.
 
 The iframe is Flutter-Web-only for now (`dart:ui_web` platform view) — no
 webview package is pulled in for Android/iOS yet, so HTML assets aren't

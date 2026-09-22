@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/api_client.dart';
+import '../util/ist_time.dart';
 import '../widgets/state_views.dart';
 
 class _SignupRequest {
@@ -130,7 +131,7 @@ class _SignupRequestsScreenState extends State<SignupRequestsScreen> {
                 Text(r.displayName, style: Theme.of(context).textTheme.titleMedium),
                 Text(r.email),
                 const SizedBox(height: 4),
-                Text('Registered: ${r.createdAt}', style: Theme.of(context).textTheme.bodySmall),
+                Text('Registered: ${formatIst(r.createdAt)}', style: Theme.of(context).textTheme.bodySmall),
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,

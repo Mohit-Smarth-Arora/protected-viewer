@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../api/api_client.dart';
 import '../state/session.dart';
 import '../theme.dart';
+import '../util/ist_time.dart';
 import '../widgets/auth_scaffold.dart';
 import '../widgets/state_views.dart';
 
@@ -485,7 +486,7 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    m['created_at'] as String,
+                    formatIstShort(m['created_at'] as String),
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: (isMine ? scheme.onPrimary : scheme.onSurface).withValues(alpha: 0.65),
                         ),

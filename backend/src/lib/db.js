@@ -103,7 +103,7 @@ db.exec(`
 
   -- type 'html': a raw HTML document, served inline (not flattened to an
   -- image) with a server-injected watermark overlay per request — see
-  -- lib/watermark.js injectWatermarkIntoHtml. Weaker protection than
+  -- lib/watermark.js prepareHtmlAsset. Weaker protection than
   -- image/snippet (view-source and save-page-as still work; nothing about
   -- HTML rendered in a browser can be made truly copy-proof), accepted
   -- deliberately for this asset type rather than flattening it to a

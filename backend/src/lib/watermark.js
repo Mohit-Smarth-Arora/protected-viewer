@@ -168,21 +168,54 @@ function buildHtmlWatermarkOverlay(label) {
 `;
 }
 
-// Injects the watermark overlay into a raw HTML document, right before
-// </body> (so it renders after — and visually on top of — the page's own
+// Blocks zoom gestures *inside the embedded page's content* — trackpad/touch
+// pinch-zoom and Ctrl+scroll-wheel zoom, both of which zoom the page's own
+// layout and visibly break it inside the app's iframe. Deliberately does
+// NOT touch the browser's own zoom (Ctrl +/-/0, the browser's pinch-zoom
+// on its chrome, view menu) — that's outside this document entirely and
+// was explicitly asked to keep working.
+//   - touch-action: pan-x pan-y on html/body tells the browser this page
+//     doesn't want pinch-zoom gestures, the standard way to opt out of it.
+//   - the wheel listener only preventDefault()s when ctrlKey is set (how
+//     browsers signal "this scroll should zoom"), so normal scrolling is
+//     completely unaffected.
+const ZOOM_LOCK_SNIPPET = `
+<style>html, body { touch-action: pan-x pan-y; }</style>
+<script>
+(function () {
+  document.addEventListener('wheel', function (e) {
+    if (e.ctrlKey) e.preventDefault();
+  }, { passive: false });
+})();
+</script>
+`;
+
+// Inserts one or more HTML fragments right before </body> (so they render
+// after — and, for the watermark, visually on top of — the page's own
 // content), or appended at the end if the document has no </body> tag at
 // all (e.g. a bare HTML fragment rather than a full document).
-function injectWatermarkIntoHtml(html, label) {
-  const overlay = buildHtmlWatermarkOverlay(label);
+function injectBeforeBodyEnd(html, fragments) {
+  const combined = fragments.join('\n');
   if (/<\/body>/i.test(html)) {
-    return html.replace(/<\/body>/i, `${overlay}</body>`);
+    return html.replace(/<\/body>/i, `${combined}</body>`);
   }
-  return `${html}\n${overlay}`;
+  return `${html}\n${combined}`;
+}
+
+// Prepares a served html asset: the zoom lock always applies (it's UX
+// consistency, not part of the deterrence mechanism — see
+// ZOOM_LOCK_SNIPPET comment), the watermark overlay only when
+// [watermarked] is true (the per-viewer opt-out — see
+// lib/folders.js shouldWatermarkHtmlFor).
+function prepareHtmlAsset(html, label, watermarked) {
+  const fragments = [ZOOM_LOCK_SNIPPET];
+  if (watermarked) fragments.push(buildHtmlWatermarkOverlay(label));
+  return injectBeforeBodyEnd(html, fragments);
 }
 
 module.exports = {
   watermarkImage,
   watermarkCodeSnippet,
-  injectWatermarkIntoHtml,
+  prepareHtmlAsset,
   OWNERSHIP_LINE,
 };

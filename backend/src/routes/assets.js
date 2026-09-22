@@ -6,7 +6,8 @@ const requireAuth = require('../middleware/requireAuth');
 const requireAgreement = require('../middleware/requireAgreement');
 const requireActiveAccount = require('../middleware/requireActiveAccount');
 const { issueAssetToken, verifyAssetToken } = require('../lib/auth');
-const { watermarkImage, watermarkCodeSnippet, injectWatermarkIntoHtml } = require('../lib/watermark');
+const { watermarkImage, watermarkCodeSnippet, prepareHtmlAsset } = require('../lib/watermark');
+const { formatIst } = require('../lib/time');
 const { STORAGE_ROOT } = require('../lib/paths');
 const { isAdmin } = require('../lib/permissions');
 const {
@@ -121,7 +122,10 @@ router.get('/:id/content', async (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.sub);
   if (!user) return res.status(401).json({ error: 'User no longer exists' });
 
-  const label = `${user.email} • ${new Date().toISOString()}`;
+  // Shown to the viewer (as part of every watermark, image/snippet/html
+  // alike) in Indian Standard Time per the owner's request — this is
+  // purely a display choice, access_log still stores UTC underneath.
+  const label = `${user.email} • ${formatIst()}`;
   const absolutePath = path.join(STORAGE_ROOT, asset.file_path);
 
   logAccess(req, user.id, asset.id, 'content_viewed', asset.title, user.email);
@@ -148,7 +152,10 @@ router.get('/:id/content', async (req, res) => {
       // (there's no "grant" row for them to carry a watermark_enabled=0
       // exception — that flag is a viewer-specific opt-out, never implicit).
       const watermarked = isAdmin(user) ? true : shouldWatermarkHtmlFor(user.id, asset.id);
-      const output = watermarked ? injectWatermarkIntoHtml(html, label) : html;
+      // Zoom lock (pinch/Ctrl+scroll inside the page) is injected
+      // unconditionally — it's UX consistency, not part of the watermark
+      // opt-out. Browser-level zoom (Ctrl +/-, browser pinch) is untouched.
+      const output = prepareHtmlAsset(html, label, watermarked);
       res.set('Content-Type', 'text/html; charset=utf-8');
       res.set('Cache-Control', 'no-store');
       // helmet() (app.js) sets X-Frame-Options: SAMEORIGIN + a

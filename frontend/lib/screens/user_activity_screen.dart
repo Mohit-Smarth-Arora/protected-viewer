@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../api/api_client.dart';
 import '../state/session.dart';
 import '../theme.dart';
+import '../util/ist_time.dart';
 import '../widgets/state_views.dart';
 import 'chat_screens.dart';
 
@@ -208,7 +209,7 @@ class _AccountsTabState extends State<_AccountsTab> {
                             _ => Icons.person_outline,
                           }),
                           title: Text(a['display_name'] as String),
-                          subtitle: Text('${a['email']} • joined ${a['created_at']}'),
+                          subtitle: Text('${a['email']} • joined ${formatIstShort(a['created_at'] as String)}'),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -328,7 +329,7 @@ class _LoginHistoryTabState extends State<_LoginHistoryTab> {
                           title: Text(l['display_name'] as String),
                           subtitle: Text('${l['email']} • ${l['ip'] ?? 'unknown IP'}'),
                           trailing: Text(
-                            (l['created_at'] as String).replaceFirst(' ', '\n'),
+                            formatIstShort(l['created_at'] as String).replaceFirst(', ', '\n'),
                             textAlign: TextAlign.end,
                             style: Theme.of(context).textTheme.bodySmall,
                           ),

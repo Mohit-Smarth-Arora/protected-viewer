@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/api_client.dart';
+import '../util/ist_time.dart';
 import '../widgets/state_views.dart';
 
 class AdminRequestSummary {
@@ -203,7 +204,7 @@ class _AdminReviewScreenState extends State<AdminReviewScreen> {
                 Text('Reason: ${r.reason}'),
                 const SizedBox(height: 8),
                 Text(
-                  'Submitted: ${r.createdAt}',
+                  'Submitted: ${formatIst(r.createdAt)}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 12),
