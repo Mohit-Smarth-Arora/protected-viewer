@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'state/session.dart';
+import 'theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/agreement_screen.dart';
 import 'screens/asset_list_screen.dart';
@@ -15,10 +16,9 @@ class ProtectedViewerApp extends StatelessWidget {
     return MaterialApp(
       title: 'Protected Viewer',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-        useMaterial3: true,
-      ),
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
+      themeMode: ThemeMode.system,
       home: const _RootRouter(),
     );
   }

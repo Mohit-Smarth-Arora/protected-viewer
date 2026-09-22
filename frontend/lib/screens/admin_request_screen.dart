@@ -99,7 +99,10 @@ class _AdminRequestScreenState extends State<AdminRequestScreen> {
       children: [
         Icon(Icons.hourglass_top, size: 48, color: Theme.of(context).colorScheme.primary),
         const SizedBox(height: 16),
-        Text('Request submitted', style: Theme.of(context).textTheme.headlineSmall),
+        Text(
+          'Request submitted',
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
         const SizedBox(height: 8),
         const Text(
           'Your request is pending review. You\'ll keep your current viewer '

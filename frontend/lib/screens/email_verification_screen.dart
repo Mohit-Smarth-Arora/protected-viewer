@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../state/session.dart';
+import '../widgets/auth_scaffold.dart';
 
 /// Shown right after registration, before the account can do anything
 /// else. The 6-digit code is emailed via SendGrid in production, or logged
@@ -50,69 +51,62 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   Widget build(BuildContext context) {
     final session = context.watch<Session>();
 
-    return Scaffold(
+    return AuthScaffold(
       appBar: AppBar(
+        backgroundColor: Colors.transparent,
         title: const Text('Verify your email'),
         actions: [
           IconButton(icon: const Icon(Icons.logout), onPressed: () => session.signOut()),
         ],
       ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 400),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Icon(Icons.mark_email_read_outlined, size: 48, color: Theme.of(context).colorScheme.primary),
-                const SizedBox(height: 12),
-                Text(
-                  'Enter the code we sent to ${session.userEmail ?? "your email"}',
-                  style: Theme.of(context).textTheme.titleMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                TextField(
-                  controller: _codeController,
-                  decoration: const InputDecoration(labelText: '6-digit code'),
-                  keyboardType: TextInputType.number,
-                  maxLength: 6,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 24, letterSpacing: 8),
-                  onSubmitted: (_) => _submit(),
-                ),
-                const SizedBox(height: 12),
-                if (session.lastError != null) ...[
-                  Text(
-                    session.lastError!,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                FilledButton(
-                  onPressed: _isSubmitting ? null : _submit,
-                  child: _isSubmitting
-                      ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('Verify'),
-                ),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: _isResending ? null : _resend,
-                  child: Text(_isResending ? 'Sending...' : 'Resend code'),
-                ),
-                if (_resendMessage != null)
-                  Text(
-                    _resendMessage!,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-              ],
-            ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Center(child: BrandMark(icon: Icons.mark_email_read_outlined)),
+          const SizedBox(height: 16),
+          Text(
+            'Enter the code we sent to ${session.userEmail ?? "your email"}',
+            style: Theme.of(context).textTheme.titleMedium,
+            textAlign: TextAlign.center,
           ),
-        ),
+          const SizedBox(height: 24),
+          TextField(
+            controller: _codeController,
+            decoration: const InputDecoration(labelText: '6-digit code'),
+            keyboardType: TextInputType.number,
+            maxLength: 6,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 24, letterSpacing: 8),
+            onSubmitted: (_) => _submit(),
+          ),
+          const SizedBox(height: 12),
+          if (session.lastError != null) ...[
+            Text(
+              session.lastError!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+          ],
+          FilledButton(
+            onPressed: _isSubmitting ? null : _submit,
+            child: _isSubmitting
+                ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('Verify'),
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: _isResending ? null : _resend,
+            child: Text(_isResending ? 'Sending...' : 'Resend code'),
+          ),
+          if (_resendMessage != null)
+            Text(
+              _resendMessage!,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+        ],
       ),
     );
   }

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/api_client.dart';
 import '../state/session.dart';
+import '../theme.dart';
+import '../widgets/state_views.dart';
 import 'chat_screens.dart';
 
 /// Admin-only (plain admin and up): three tabs — all accounts, sign-in
@@ -167,22 +169,21 @@ class _AccountsTabState extends State<_AccountsTab> {
 
   @override
   Widget build(BuildContext context) {
-    if (_error != null) return Center(child: Text(_error!));
-    if (_accounts == null) return const Center(child: CircularProgressIndicator());
-    if (_accounts!.isEmpty) return const Center(child: Text('No accounts.'));
+    if (_error != null) return ErrorState(message: _error!, onRetry: _load);
+    if (_accounts == null) return const LoadingState();
+    if (_accounts!.isEmpty) return const EmptyState(icon: Icons.people_outline, message: 'No accounts.');
 
     final filtered = _filteredAccounts;
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
           child: TextField(
             controller: _searchController,
             decoration: const InputDecoration(
               prefixIcon: Icon(Icons.search),
               hintText: 'Search by name or email',
               isDense: true,
-              border: OutlineInputBorder(),
             ),
           ),
         ),
@@ -190,40 +191,43 @@ class _AccountsTabState extends State<_AccountsTab> {
           child: RefreshIndicator(
             onRefresh: _load,
             child: filtered.isEmpty
-                ? ListView(children: const [SizedBox(height: 40), Center(child: Text('No matches.'))])
-                : ListView.separated(
+                ? ListView(children: const [EmptyState(icon: Icons.search_off, message: 'No matches.')])
+                : ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
                     itemCount: filtered.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, i) {
                       final a = filtered[i];
                       final role = a['role'] as String;
                       final canDelete = role != 'owner' && context.watch<Session>().effectiveMasterAccess;
-                      return ListTile(
-                        leading: Icon(switch (role) {
-                          'owner' => Icons.workspace_premium,
-                          'admin' => Icons.admin_panel_settings_outlined,
-                          _ => Icons.person_outline,
-                        }),
-                        title: Text(a['display_name'] as String),
-                        subtitle: Text('${a['email']} • joined ${a['created_at']}'),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (role == 'viewer')
-                              IconButton(
-                                icon: const Icon(Icons.chat_bubble_outline),
-                                tooltip: 'Message',
-                                onPressed: () => _messageViewer(context, a),
-                              )
-                            else
-                              Chip(label: Text(role)),
-                            if (canDelete)
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline),
-                                tooltip: 'Delete account',
-                                onPressed: () => _deleteAccount(context, a),
-                              ),
-                          ],
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          leading: TonalIcon(switch (role) {
+                            'owner' => Icons.workspace_premium,
+                            'admin' => Icons.admin_panel_settings_outlined,
+                            _ => Icons.person_outline,
+                          }),
+                          title: Text(a['display_name'] as String),
+                          subtitle: Text('${a['email']} • joined ${a['created_at']}'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (role == 'viewer')
+                                IconButton(
+                                  icon: const Icon(Icons.chat_bubble_outline),
+                                  tooltip: 'Message',
+                                  onPressed: () => _messageViewer(context, a),
+                                )
+                              else
+                                Chip(label: Text(role)),
+                              if (canDelete)
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline),
+                                  tooltip: 'Delete account',
+                                  onPressed: () => _deleteAccount(context, a),
+                                ),
+                            ],
+                          ),
                         ),
                       );
                     },
@@ -287,22 +291,23 @@ class _LoginHistoryTabState extends State<_LoginHistoryTab> {
 
   @override
   Widget build(BuildContext context) {
-    if (_error != null) return Center(child: Text(_error!));
-    if (_logins == null) return const Center(child: CircularProgressIndicator());
-    if (_logins!.isEmpty) return const Center(child: Text('No sign-ins recorded yet.'));
+    if (_error != null) return ErrorState(message: _error!, onRetry: _load);
+    if (_logins == null) return const LoadingState();
+    if (_logins!.isEmpty) {
+      return const EmptyState(icon: Icons.history, message: 'No sign-ins recorded yet.');
+    }
 
     final filtered = _filteredLogins;
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
           child: TextField(
             controller: _searchController,
             decoration: const InputDecoration(
               prefixIcon: Icon(Icons.search),
               hintText: 'Search by name or email',
               isDense: true,
-              border: OutlineInputBorder(),
             ),
           ),
         ),
@@ -310,20 +315,23 @@ class _LoginHistoryTabState extends State<_LoginHistoryTab> {
           child: RefreshIndicator(
             onRefresh: _load,
             child: filtered.isEmpty
-                ? ListView(children: const [SizedBox(height: 40), Center(child: Text('No matches.'))])
-                : ListView.separated(
+                ? ListView(children: const [EmptyState(icon: Icons.search_off, message: 'No matches.')])
+                : ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
                     itemCount: filtered.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, i) {
                       final l = filtered[i];
-                      return ListTile(
-                        leading: const Icon(Icons.login),
-                        title: Text(l['display_name'] as String),
-                        subtitle: Text('${l['email']} • ${l['ip'] ?? 'unknown IP'}'),
-                        trailing: Text(
-                          (l['created_at'] as String).replaceFirst(' ', '\n'),
-                          textAlign: TextAlign.end,
-                          style: Theme.of(context).textTheme.bodySmall,
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          leading: const TonalIcon(Icons.login),
+                          title: Text(l['display_name'] as String),
+                          subtitle: Text('${l['email']} • ${l['ip'] ?? 'unknown IP'}'),
+                          trailing: Text(
+                            (l['created_at'] as String).replaceFirst(' ', '\n'),
+                            textAlign: TextAlign.end,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
                         ),
                       );
                     },
@@ -370,44 +378,49 @@ class _OnlineNowTabState extends State<_OnlineNowTab> {
 
   @override
   Widget build(BuildContext context) {
-    if (_error != null) return Center(child: Text(_error!));
-    if (_online == null) return const Center(child: CircularProgressIndicator());
+    if (_error != null) return ErrorState(message: _error!, onRetry: _load);
+    if (_online == null) return const LoadingState();
 
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
         children: [
           Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.only(bottom: 8, left: 4),
             child: Text(
               'Active in the last ${_windowMinutes ?? 2} minute(s). Pull to refresh.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
           if (_online!.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 40),
-              child: Center(child: Text('No one else is active right now.')),
-            )
+            const EmptyState(icon: Icons.nightlight_outlined, message: 'No one else is active right now.')
           else
             for (final u in _online!)
-              ListTile(
-                leading: Stack(
-                  children: [
-                    const Icon(Icons.person_outline),
-                    Positioned(
-                      right: 0,
-                      bottom: 0,
-                      child: Container(
-                        width: 10,
-                        height: 10,
-                        decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
+              Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  leading: Stack(
+                    children: [
+                      const TonalIcon(Icons.person_outline),
+                      Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          width: 11,
+                          height: 11,
+                          decoration: BoxDecoration(
+                            color: Colors.green,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Theme.of(context).colorScheme.surfaceContainerLow, width: 2),
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
+                  title: Text(u['display_name'] as String),
+                  subtitle: Text(u['email'] as String),
                 ),
-                title: Text(u['display_name'] as String),
-                subtitle: Text(u['email'] as String),
               ),
         ],
       ),

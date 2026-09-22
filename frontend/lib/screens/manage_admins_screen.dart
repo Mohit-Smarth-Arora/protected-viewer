@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/api_client.dart';
 import '../state/session.dart';
+import '../theme.dart';
+import '../widgets/state_views.dart';
 
 class AdminSummary {
   AdminSummary.fromJson(Map<String, dynamic> json)
@@ -81,28 +83,33 @@ class _ManageAdminsScreenState extends State<ManageAdminsScreen> {
 
   Widget _buildBody() {
     if (_error != null) {
-      return ListView(children: [const SizedBox(height: 60), Center(child: Text(_error!))]);
+      return ErrorState(message: _error!, onRetry: _load);
     }
     if (_admins == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const LoadingState();
     }
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+    if (_admins!.isEmpty) {
+      return const EmptyState(icon: Icons.admin_panel_settings_outlined, message: 'No admins yet.');
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
       itemCount: _admins!.length,
-      separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, i) {
         final admin = _admins![i];
         final isOwner = admin.role == 'owner';
-        return ListTile(
-          leading: Icon(isOwner ? Icons.workspace_premium : Icons.admin_panel_settings_outlined),
-          title: Text(admin.displayName),
-          subtitle: Text('${admin.email} • ${isOwner ? "Owner" : "Admin"}'),
-          trailing: isOwner
-              ? const Chip(label: Text('Always full access'))
-              : Switch(
-                  value: admin.hasMasterAccess,
-                  onChanged: (value) => _toggleMasterAccess(admin, value),
-                ),
+        return Card(
+          margin: const EdgeInsets.only(bottom: 8),
+          child: ListTile(
+            leading: TonalIcon(isOwner ? Icons.workspace_premium : Icons.admin_panel_settings_outlined),
+            title: Text(admin.displayName),
+            subtitle: Text('${admin.email} • ${isOwner ? "Owner" : "Admin"}'),
+            trailing: isOwner
+                ? const Chip(label: Text('Always full access'))
+                : Switch(
+                    value: admin.hasMasterAccess,
+                    onChanged: (value) => _toggleMasterAccess(admin, value),
+                  ),
+          ),
         );
       },
     );

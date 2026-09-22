@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/api_client.dart';
+import '../theme.dart';
+import '../widgets/state_views.dart';
 
 class _ReferralCode {
   _ReferralCode.fromJson(Map<String, dynamic> json)
@@ -97,23 +99,17 @@ class _ReferralCodesScreenState extends State<ReferralCodesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Referral codes'),
-        actions: [
-          IconButton(icon: const Icon(Icons.add), tooltip: 'New code', onPressed: _create),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Referral codes')),
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
             child: TextField(
               controller: _searchController,
               decoration: const InputDecoration(
                 prefixIcon: Icon(Icons.search),
                 hintText: 'Search codes',
                 isDense: true,
-                border: OutlineInputBorder(),
               ),
             ),
           ),
@@ -129,27 +125,28 @@ class _ReferralCodesScreenState extends State<ReferralCodesScreen> {
   }
 
   Widget _buildBody() {
-    if (_error != null) return ListView(children: [const SizedBox(height: 60), Center(child: Text(_error!))]);
-    if (_codes == null) return const Center(child: CircularProgressIndicator());
+    if (_error != null) return ErrorState(message: _error!, onRetry: _load);
+    if (_codes == null) return const LoadingState();
     final filtered = _filteredCodes;
     if (filtered.isEmpty) {
-      return ListView(
-        children: [
-          const SizedBox(height: 60),
-          Center(child: Text(_codes!.isEmpty ? 'No referral codes yet.' : 'No codes match your search.')),
-        ],
+      return EmptyState(
+        icon: Icons.qr_code,
+        message: _codes!.isEmpty ? 'No referral codes yet.' : 'No codes match your search.',
       );
     }
-    return ListView.separated(
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
       itemCount: filtered.length,
-      separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, i) {
         final code = filtered[i];
-        return ListTile(
-          leading: Icon(code.isActive ? Icons.qr_code : Icons.qr_code_2_outlined),
-          title: SelectableText(code.code, style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 2)),
-          subtitle: Text('${code.usesCount} use(s) • by ${code.createdByName}'),
-          trailing: Switch(value: code.isActive, onChanged: (_) => _toggle(code)),
+        return Card(
+          margin: const EdgeInsets.only(bottom: 8),
+          child: ListTile(
+            leading: TonalIcon(code.isActive ? Icons.qr_code : Icons.qr_code_2_outlined),
+            title: SelectableText(code.code, style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 2)),
+            subtitle: Text('${code.usesCount} use(s) • by ${code.createdByName}'),
+            trailing: Switch(value: code.isActive, onChanged: (_) => _toggle(code)),
+          ),
         );
       },
     );

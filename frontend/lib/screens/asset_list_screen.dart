@@ -1,16 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/api_client.dart';
-import '../state/session.dart';
+import '../theme.dart';
+import '../widgets/app_drawer.dart';
+import '../widgets/state_views.dart';
 import 'asset_viewer_screen.dart';
-import 'admin_request_screen.dart';
-import 'admin_review_screen.dart';
-import 'manage_admins_screen.dart';
-import 'manage_assets_screen.dart';
-import 'user_activity_screen.dart';
-import 'chat_screens.dart';
-import 'referral_codes_screen.dart';
-import 'signup_requests_screen.dart';
 
 class AssetSummary {
   AssetSummary({required this.id, required this.type, required this.title});
@@ -128,8 +122,6 @@ class _AssetListScreenState extends State<AssetListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final session = context.watch<Session>();
-
     return Scaffold(
       appBar: AppBar(
         title: Text(_path.isEmpty ? 'Shared with you' : _path.last.$2),
@@ -139,8 +131,8 @@ class _AssetListScreenState extends State<AssetListScreen> {
                 icon: const Icon(Icons.arrow_back),
                 onPressed: () => _goToBreadcrumb(_path.length - 2),
               ),
-        actions: [_buildMenu(session)],
       ),
+      drawer: _path.isEmpty ? const AppDrawer() : null,
       body: Column(
         children: [
           if (_path.isNotEmpty) _buildBreadcrumbs(),
@@ -155,38 +147,49 @@ class _AssetListScreenState extends State<AssetListScreen> {
 
   Widget _buildSearchBar() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
       child: TextField(
         controller: _searchController,
         decoration: const InputDecoration(
           prefixIcon: Icon(Icons.search),
           hintText: 'Search this folder',
           isDense: true,
-          border: OutlineInputBorder(),
         ),
       ),
     );
   }
 
   Widget _buildBreadcrumbs() {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: scheme.surfaceContainerLow,
       child: Wrap(
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          InkWell(onTap: () => _goToBreadcrumb(-1), child: const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4),
-            child: Icon(Icons.home, size: 18),
-          )),
+          InkWell(
+            borderRadius: BorderRadius.circular(6),
+            onTap: () => _goToBreadcrumb(-1),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Icon(Icons.home_outlined, size: 18, color: scheme.primary),
+            ),
+          ),
           for (var i = 0; i < _path.length; i++) ...[
-            const Icon(Icons.chevron_right, size: 18),
+            Icon(Icons.chevron_right, size: 18, color: scheme.onSurfaceVariant),
             InkWell(
+              borderRadius: BorderRadius.circular(6),
               onTap: () => _goToBreadcrumb(i),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(_path[i].$2),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Text(
+                  _path[i].$2,
+                  style: TextStyle(
+                    color: i == _path.length - 1 ? scheme.onSurface : scheme.primary,
+                    fontWeight: i == _path.length - 1 ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                ),
               ),
             ),
           ],
@@ -195,165 +198,19 @@ class _AssetListScreenState extends State<AssetListScreen> {
     );
   }
 
-  Widget _buildMenu(Session session) {
-    return PopupMenuButton<String>(
-      icon: const Icon(Icons.more_vert),
-      onSelected: (value) {
-        switch (value) {
-          case 'manage_assets':
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ManageAssetsScreen()),
-            );
-          case 'manage_admins':
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ManageAdminsScreen()),
-            );
-          case 'review_requests':
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const AdminReviewScreen()),
-            );
-          case 'user_activity':
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const UserActivityScreen()),
-            );
-          case 'signup_requests':
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SignupRequestsScreen()),
-            );
-          case 'referral_codes':
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ReferralCodesScreen()),
-            );
-          case 'chat_requests':
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ChatRequestsScreen()),
-            );
-          case 'chat_threads':
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ChatThreadsScreen()),
-            );
-          case 'request_admin':
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const AdminRequestScreen()),
-            );
-          case 'request_chat':
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const RequestChatScreen()),
-            );
-          case 'sign_out':
-            session.signOut();
-        }
-      },
-      itemBuilder: (context) => [
-        if (session.isAdmin) ...[
-          const PopupMenuItem(
-            value: 'manage_assets',
-            child: ListTile(
-              leading: Icon(Icons.folder_shared_outlined),
-              title: Text('Manage assets'),
-            ),
-          ),
-          const PopupMenuItem(
-            value: 'chat_requests',
-            child: ListTile(
-              leading: Icon(Icons.mark_chat_unread_outlined),
-              title: Text('Chat requests'),
-            ),
-          ),
-          const PopupMenuItem(
-            value: 'chat_threads',
-            child: ListTile(
-              leading: Icon(Icons.chat_outlined),
-              title: Text('Messages'),
-            ),
-          ),
-          const PopupMenuItem(
-            value: 'user_activity',
-            child: ListTile(
-              leading: Icon(Icons.people_outline),
-              title: Text('Users & activity'),
-            ),
-          ),
-          const PopupMenuItem(
-            value: 'signup_requests',
-            child: ListTile(
-              leading: Icon(Icons.how_to_reg_outlined),
-              title: Text('Signup requests'),
-            ),
-          ),
-        ],
-        if (session.effectiveMasterAccess) ...[
-          const PopupMenuItem(
-            value: 'review_requests',
-            child: ListTile(
-              leading: Icon(Icons.fact_check_outlined),
-              title: Text('Review admin requests'),
-            ),
-          ),
-          const PopupMenuItem(
-            value: 'manage_admins',
-            child: ListTile(
-              leading: Icon(Icons.admin_panel_settings_outlined),
-              title: Text('Manage admins'),
-            ),
-          ),
-          const PopupMenuItem(
-            value: 'referral_codes',
-            child: ListTile(
-              leading: Icon(Icons.qr_code),
-              title: Text('Referral codes'),
-            ),
-          ),
-        ],
-        if (!session.isAdmin) ...[
-          const PopupMenuItem(
-            value: 'request_chat',
-            child: ListTile(
-              leading: Icon(Icons.chat_bubble_outline),
-              title: Text('Message an admin'),
-            ),
-          ),
-          const PopupMenuItem(
-            value: 'request_admin',
-            child: ListTile(
-              leading: Icon(Icons.upgrade_outlined),
-              title: Text('Request admin access'),
-            ),
-          ),
-        ],
-        PopupMenuItem(
-          value: 'sign_out',
-          child: ListTile(
-            leading: const Icon(Icons.logout),
-            title: Text('Sign out (${session.userEmail ?? ''})'),
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildBody() {
     if (_error != null) {
-      return ListView(
-        children: [
-          const SizedBox(height: 80),
-          Icon(Icons.error_outline, size: 40, color: Colors.red.shade300),
-          const SizedBox(height: 12),
-          Text(_error!, textAlign: TextAlign.center),
-        ],
-      );
+      return ListView(children: [ErrorState(message: _error!, onRetry: _load)]);
     }
     if (_folders == null || _assets == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const LoadingState();
     }
     if (_folders!.isEmpty && _assets!.isEmpty) {
       return ListView(
         children: [
-          const SizedBox(height: 80),
-          Center(
-            child: Text(
-              _path.isEmpty ? 'Nothing has been shared with you yet.' : 'This folder is empty.',
-            ),
+          EmptyState(
+            icon: Icons.folder_off_outlined,
+            message: _path.isEmpty ? 'Nothing has been shared with you yet.' : 'This folder is empty.',
           ),
         ],
       );
@@ -361,31 +218,36 @@ class _AssetListScreenState extends State<AssetListScreen> {
     final folders = _filteredFolders;
     final assets = _filteredAssets;
     if (folders.isEmpty && assets.isEmpty) {
-      return ListView(
-        children: const [SizedBox(height: 80), Center(child: Text('No matches for your search.'))],
-      );
+      return ListView(children: const [EmptyState(icon: Icons.search_off, message: 'No matches for your search.')]);
     }
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
       children: [
         for (final folder in folders)
-          ListTile(
-            leading: const Icon(Icons.folder_outlined),
-            title: Text(folder.name),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _openFolder(folder),
+          Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: ListTile(
+              leading: const TonalIcon(Icons.folder_outlined),
+              title: Text(folder.name),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _openFolder(folder),
+            ),
           ),
-        if (folders.isNotEmpty && assets.isNotEmpty) const Divider(height: 1),
+        if (folders.isNotEmpty && assets.isNotEmpty) const SizedBox(height: 8),
         for (final asset in assets)
-          ListTile(
-            leading: Icon(asset.icon),
-            title: Text(asset.title),
-            subtitle: Text(asset.type),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => AssetViewerScreen(asset: asset)),
-              );
-            },
+          Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: ListTile(
+              leading: TonalIcon(asset.icon),
+              title: Text(asset.title),
+              subtitle: Text(asset.type),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => AssetViewerScreen(asset: asset)),
+                );
+              },
+            ),
           ),
       ],
     );

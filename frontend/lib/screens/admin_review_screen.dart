@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/api_client.dart';
+import '../widgets/state_views.dart';
 
 class AdminRequestSummary {
   AdminRequestSummary.fromJson(Map<String, dynamic> json)
@@ -151,14 +152,13 @@ class _AdminReviewScreenState extends State<AdminReviewScreen> {
         children: [
           if ((_requests?.length ?? 0) > 5)
             Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
               child: TextField(
                 controller: _searchController,
                 decoration: const InputDecoration(
                   prefixIcon: Icon(Icons.search),
                   hintText: 'Search by name or email',
                   isDense: true,
-                  border: OutlineInputBorder(),
                 ),
               ),
             ),
@@ -170,27 +170,20 @@ class _AdminReviewScreenState extends State<AdminReviewScreen> {
 
   Widget _buildBody() {
     if (_error != null) {
-      return ListView(
-        children: [const SizedBox(height: 60), Center(child: Text(_error!))],
-      );
+      return ErrorState(message: _error!, onRetry: _load);
     }
     if (_requests == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const LoadingState();
     }
     if (_requests!.isEmpty) {
-      return ListView(
-        children: const [
-          SizedBox(height: 60),
-          Center(child: Text('No pending requests.')),
-        ],
-      );
+      return const EmptyState(icon: Icons.fact_check_outlined, message: 'No pending requests.');
     }
     final filtered = _filteredRequests;
     if (filtered.isEmpty) {
-      return ListView(children: const [SizedBox(height: 60), Center(child: Text('No matches.'))]);
+      return const EmptyState(icon: Icons.search_off, message: 'No matches.');
     }
     return ListView.builder(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
       itemCount: filtered.length,
       itemBuilder: (context, i) {
         final r = filtered[i];

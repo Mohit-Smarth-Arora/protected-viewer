@@ -237,6 +237,9 @@ backend/
 
 frontend/                  Flutter app (web + android platforms scaffolded)
   lib/
+    theme.dart                Central ColorScheme (light+dark, seeded, Material 3)
+                               + component themes (cards, inputs, buttons, etc.) —
+                               the one place to touch to re-skin the app
     api/api_client.dart      Talks to the backend; no security logic of its own
     state/session.dart       Auth/role/agreement status, session token (in-memory),
                               heartbeat timer while signed in
@@ -253,6 +256,18 @@ frontend/                  Flutter app (web + android platforms scaffolded)
                                    no long-press/right-click save affordance) —
                                    UX friction, not real security; see threat
                                    model above
+      state_views.dart            Shared LoadingState/EmptyState/ErrorState used
+                                   by every list/data screen instead of each
+                                   screen hand-rolling its own placeholder
+      app_drawer.dart              App-wide nav drawer, grouped by section
+                                   (Library / People / Owner controls / Get help)
+                                   — replaced a PopupMenuButton overflow menu that
+                                   had outgrown a popup once the admin surface
+                                   passed ~10 destinations
+      auth_scaffold.dart           Shared branded shell (gradient backdrop, card,
+                                   BrandMark) for the pre-signed-in gate screens
+                                   (login, email verification, pending approval,
+                                   agreement)
 
 .github/workflows/deploy-frontend.yml   Builds + deploys frontend to GitHub Pages
 ```

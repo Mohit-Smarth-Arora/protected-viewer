@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/api_client.dart';
 import '../state/session.dart';
+import '../theme.dart';
+import '../widgets/auth_scaffold.dart';
+import '../widgets/state_views.dart';
 
 // ---- Viewer: request a chat ----------------------------------------------
 
@@ -63,9 +66,12 @@ class _RequestChatScreenState extends State<RequestChatScreen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.hourglass_top, size: 48, color: Theme.of(context).colorScheme.primary),
+        const BrandMark(icon: Icons.hourglass_top),
         const SizedBox(height: 16),
-        Text('Request sent', style: Theme.of(context).textTheme.headlineSmall),
+        Text(
+          'Request sent',
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
         const SizedBox(height: 8),
         const Text('An admin will review it and can start a conversation with you.', textAlign: TextAlign.center),
         const SizedBox(height: 20),
@@ -186,14 +192,13 @@ class _ChatRequestsScreenState extends State<ChatRequestsScreen> {
         children: [
           if ((_requests?.length ?? 0) > 5)
             Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
               child: TextField(
                 controller: _searchController,
                 decoration: const InputDecoration(
                   prefixIcon: Icon(Icons.search),
                   hintText: 'Search by name or email',
                   isDense: true,
-                  border: OutlineInputBorder(),
                 ),
               ),
             ),
@@ -204,19 +209,17 @@ class _ChatRequestsScreenState extends State<ChatRequestsScreen> {
   }
 
   Widget _buildBody() {
-    if (_error != null) return Center(child: Text(_error!));
-    if (_requests == null) return const Center(child: CircularProgressIndicator());
+    if (_error != null) return ErrorState(message: _error!, onRetry: _load);
+    if (_requests == null) return const LoadingState();
     if (_requests!.isEmpty) {
-      return ListView(
-        children: const [SizedBox(height: 60), Center(child: Text('No pending chat requests.'))],
-      );
+      return const EmptyState(icon: Icons.mark_chat_unread_outlined, message: 'No pending chat requests.');
     }
     final filtered = _filteredRequests;
     if (filtered.isEmpty) {
-      return ListView(children: const [SizedBox(height: 60), Center(child: Text('No matches.'))]);
+      return const EmptyState(icon: Icons.search_off, message: 'No matches.');
     }
     return ListView.builder(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
       itemCount: filtered.length,
       itemBuilder: (context, i) {
         final r = filtered[i];
@@ -310,14 +313,13 @@ class _ChatThreadsScreenState extends State<ChatThreadsScreen> {
         children: [
           if ((_threads?.length ?? 0) > 5)
             Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
               child: TextField(
                 controller: _searchController,
                 decoration: const InputDecoration(
                   prefixIcon: Icon(Icons.search),
                   hintText: 'Search conversations',
                   isDense: true,
-                  border: OutlineInputBorder(),
                 ),
               ),
             ),
@@ -328,36 +330,38 @@ class _ChatThreadsScreenState extends State<ChatThreadsScreen> {
   }
 
   Widget _buildBody() {
-    if (_error != null) return Center(child: Text(_error!));
-    if (_threads == null) return const Center(child: CircularProgressIndicator());
+    if (_error != null) return ErrorState(message: _error!, onRetry: _load);
+    if (_threads == null) return const LoadingState();
     if (_threads!.isEmpty) {
-      return ListView(
-        children: const [SizedBox(height: 60), Center(child: Text('No conversations yet.'))],
-      );
+      return const EmptyState(icon: Icons.chat_bubble_outline, message: 'No conversations yet.');
     }
     final filtered = _filteredThreads;
     if (filtered.isEmpty) {
-      return ListView(children: const [SizedBox(height: 60), Center(child: Text('No matches.'))]);
+      return const EmptyState(icon: Icons.search_off, message: 'No matches.');
     }
-    return ListView.separated(
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
       itemCount: filtered.length,
-      separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, i) {
         final t = filtered[i];
-        return ListTile(
-          leading: const Icon(Icons.chat_bubble_outline),
-          title: Text(t['display_name'] as String),
-          subtitle: Text(t['email'] as String),
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => ChatThreadScreen(
-                  threadId: t['id'] as int,
-                  otherPartyName: t['display_name'] as String,
+        return Card(
+          margin: const EdgeInsets.only(bottom: 8),
+          child: ListTile(
+            leading: const TonalIcon(Icons.chat_bubble_outline),
+            title: Text(t['display_name'] as String),
+            subtitle: Text(t['email'] as String),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ChatThreadScreen(
+                    threadId: t['id'] as int,
+                    otherPartyName: t['display_name'] as String,
+                  ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         );
       },
     );
@@ -440,12 +444,13 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
   }
 
   Widget _buildMessages() {
-    if (_error != null) return Center(child: Text(_error!));
-    if (_messages == null) return const Center(child: CircularProgressIndicator());
+    if (_error != null) return ErrorState(message: _error!, onRetry: _load);
+    if (_messages == null) return const LoadingState();
     if (_messages!.isEmpty) {
-      return const Center(child: Text('No messages yet — say hello.'));
+      return const EmptyState(icon: Icons.waving_hand_outlined, message: 'No messages yet — say hello.');
     }
     final myUserId = context.watch<Session>().userId;
+    final scheme = Theme.of(context).colorScheme;
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView.builder(
@@ -459,23 +464,31 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
             alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
             child: Container(
               margin: const EdgeInsets.symmetric(vertical: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
               decoration: BoxDecoration(
-                color: isMine
-                    ? Theme.of(context).colorScheme.primaryContainer
-                    : Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
+                color: isMine ? scheme.primary : scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(16),
+                  topRight: const Radius.circular(16),
+                  bottomLeft: Radius.circular(isMine ? 16 : 4),
+                  bottomRight: Radius.circular(isMine ? 4 : 16),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(m['body'] as String),
+                  Text(
+                    m['body'] as String,
+                    style: TextStyle(color: isMine ? scheme.onPrimary : scheme.onSurface),
+                  ),
                   const SizedBox(height: 4),
                   Text(
                     m['created_at'] as String,
-                    style: Theme.of(context).textTheme.labelSmall,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: (isMine ? scheme.onPrimary : scheme.onSurface).withValues(alpha: 0.65),
+                        ),
                   ),
                 ],
               ),
@@ -487,21 +500,31 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
   }
 
   Widget _buildComposer() {
+    final scheme = Theme.of(context).colorScheme;
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(8),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          border: Border(top: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.6))),
+        ),
         child: Row(
           children: [
             Expanded(
               child: TextField(
                 controller: _bodyController,
-                decoration: const InputDecoration(hintText: 'Message'),
+                decoration: const InputDecoration(hintText: 'Message', isDense: true),
                 onSubmitted: (_) => _send(),
               ),
             ),
-            IconButton(
+            const SizedBox(width: 8),
+            IconButton.filled(
               icon: _isSending
-                  ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
                   : const Icon(Icons.send),
               onPressed: _isSending ? null : _send,
             ),

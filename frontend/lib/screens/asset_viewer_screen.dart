@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/api_client.dart';
 import '../widgets/protected_image_view.dart';
+import '../widgets/state_views.dart';
 import 'asset_list_screen.dart';
 
 /// Fetches a short-lived per-asset token, then the watermarked bytes for
@@ -51,32 +52,37 @@ class _AssetViewerScreenState extends State<AssetViewerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.asset.title)),
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: Text(widget.asset.title),
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+      ),
       body: _buildBody(),
     );
   }
 
   Widget _buildBody() {
+    // Viewer content sits on a pure-black backdrop regardless of the app's
+    // light/dark theme (deliberate — maximizes contrast for viewing
+    // screenshots/code and matches a "focused viewer" feel), so the shared
+    // state widgets are wrapped in a forced dark Theme here to stay legible.
     if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.lock_outline, size: 40, color: Colors.red.shade300),
-              const SizedBox(height: 12),
-              Text(_error!, textAlign: TextAlign.center),
-              const SizedBox(height: 16),
-              FilledButton(onPressed: _load, child: const Text('Retry')),
-            ],
-          ),
+      return ColoredBox(
+        color: Colors.black,
+        child: Theme(
+          data: ThemeData.dark(useMaterial3: true),
+          child: ErrorState(message: _error!, onRetry: _load),
         ),
       );
     }
 
     if (_bytes == null) {
-      return const Center(child: CircularProgressIndicator());
+      return ColoredBox(
+        color: Colors.black,
+        child: Theme(data: ThemeData.dark(useMaterial3: true), child: const LoadingState()),
+      );
     }
 
     // Both 'image' and 'snippet' asset types arrive as watermarked PNG
