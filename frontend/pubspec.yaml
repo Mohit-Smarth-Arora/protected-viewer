@@ -45,6 +45,9 @@ dependencies:
   provider: ^6.1.5
   # File selection for admin-request photo and asset uploads (cross-platform)
   file_picker: ^10.3.4
+  # Web-only bindings (HTMLIFrameElement etc.) used to embed HTML assets
+  # in-app via an iframe — see widgets/inline_iframe.dart
+  web: ^1.1.0
 
 dev_dependencies:
   flutter_test:

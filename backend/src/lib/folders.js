@@ -41,6 +41,20 @@ function hasAccessToAsset(userId, asset) {
   return false;
 }
 
+// Whether the watermark overlay should be shown to this user for this
+// asset — only meaningful for type='html' (see db.js asset_grants
+// comment; image/snippet are always pixel-watermarked regardless).
+// Only a direct per-asset grant can turn it off; access via a folder grant,
+// or as an admin/owner with no explicit grant row, always watermarks —
+// the "no watermark" exception is opt-in per viewer, never a default.
+function shouldWatermarkHtmlFor(userId, assetId) {
+  const grant = db
+    .prepare('SELECT watermark_enabled FROM asset_grants WHERE user_id = ? AND asset_id = ?')
+    .get(userId, assetId);
+  if (!grant) return true;
+  return grant.watermark_enabled !== 0;
+}
+
 // Full folder subtree (folder + all descendant folder ids), used when
 // deleting a folder or listing "everything under here" for the admin UI.
 function folderSubtreeIds(rootFolderId) {
@@ -58,4 +72,10 @@ function folderSubtreeIds(rootFolderId) {
   return ids;
 }
 
-module.exports = { folderAncestorChain, hasAccessToFolder, hasAccessToAsset, folderSubtreeIds };
+module.exports = {
+  folderAncestorChain,
+  hasAccessToFolder,
+  hasAccessToAsset,
+  folderSubtreeIds,
+  shouldWatermarkHtmlFor,
+};

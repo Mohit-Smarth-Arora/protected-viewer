@@ -287,8 +287,8 @@ router.delete('/folders/:id/grants/:userId', (req, res) => {
 
 router.post('/assets', uploadAssetToMemory.single('file'), async (req, res) => {
   const { type, title, folderId } = req.body || {};
-  if (!['image', 'snippet'].includes(type)) {
-    return res.status(400).json({ error: "type must be 'image' or 'snippet' (video not supported yet)" });
+  if (!['image', 'snippet', 'html'].includes(type)) {
+    return res.status(400).json({ error: "type must be 'image', 'snippet', or 'html' (video not supported yet)" });
   }
   if (typeof title !== 'string' || title.trim().length === 0) {
     return res.status(400).json({ error: 'Title is required' });
@@ -302,8 +302,8 @@ router.post('/assets', uploadAssetToMemory.single('file'), async (req, res) => {
   }
 
   const id = nanoid(10);
-  const subDir = type === 'image' ? 'images' : 'snippets';
-  const ext = path.extname(req.file.originalname) || (type === 'image' ? '.png' : '.py');
+  const subDir = type === 'image' ? 'images' : type === 'snippet' ? 'snippets' : 'html';
+  const ext = path.extname(req.file.originalname) || (type === 'image' ? '.png' : type === 'snippet' ? '.py' : '.html');
   const fileName = `${id}${ext}`;
   const destDir = path.join(assetsDir, subDir);
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
@@ -471,7 +471,7 @@ router.delete('/users/:id', requireMasterAccess, (req, res) => {
 router.get('/assets/:id/grants', (req, res) => {
   const rows = db
     .prepare(
-      `SELECT u.id AS user_id, u.email, u.display_name
+      `SELECT u.id AS user_id, u.email, u.display_name, g.watermark_enabled
        FROM asset_grants g JOIN users u ON u.id = g.user_id
        WHERE g.asset_id = ?`
     )
@@ -479,17 +479,23 @@ router.get('/assets/:id/grants', (req, res) => {
   res.json({ grants: rows });
 });
 
+// watermarkEnabled only matters for type='html' assets (image/snippet are
+// always pixel-watermarked server-side regardless of this flag — see
+// db.js asset_grants comment). Defaults true when omitted so the common
+// case (grant with watermark on) doesn't require callers to pass it.
 router.post('/assets/:id/grants', (req, res) => {
-  const { userId } = req.body || {};
+  const { userId, watermarkEnabled } = req.body || {};
   const asset = db.prepare('SELECT id FROM assets WHERE id = ?').get(req.params.id);
   if (!asset) return res.status(404).json({ error: 'Asset not found' });
   const user = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'viewer'").get(userId);
   if (!user) return res.status(404).json({ error: 'Viewer not found' });
 
+  const watermarkFlag = watermarkEnabled === false ? 0 : 1;
+
   db.prepare(
-    `INSERT INTO asset_grants (user_id, asset_id, granted_by) VALUES (?, ?, ?)
-     ON CONFLICT(user_id, asset_id) DO NOTHING`
-  ).run(userId, asset.id, req.user.id);
+    `INSERT INTO asset_grants (user_id, asset_id, granted_by, watermark_enabled) VALUES (?, ?, ?, ?)
+     ON CONFLICT(user_id, asset_id) DO UPDATE SET watermark_enabled = excluded.watermark_enabled`
+  ).run(userId, asset.id, req.user.id, watermarkFlag);
 
   res.status(201).json({ ok: true });
 });

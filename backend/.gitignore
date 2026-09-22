@@ -13,5 +13,6 @@ data/*.sqlite-shm
 admin_photos/
 assets/images/*
 assets/snippets/*
+assets/html/*
 !assets/images/sample.png
 !assets/snippets/sample.py

@@ -369,7 +369,11 @@ class _ManageAssetsScreenState extends State<ManageAssetsScreen> {
           Card(
             margin: const EdgeInsets.only(bottom: 8),
             child: ListTile(
-              leading: TonalIcon(asset.type == 'image' ? Icons.image_outlined : Icons.code_outlined),
+              leading: TonalIcon(switch (asset.type) {
+                'image' => Icons.image_outlined,
+                'html' => Icons.web_outlined,
+                _ => Icons.code_outlined,
+              }),
               title: Text(asset.title),
               subtitle: Text('${asset.type}${asset.uploadedByName != null ? " • by ${asset.uploadedByName}" : ""}'),
               trailing: Row(
@@ -420,6 +424,7 @@ class _UploadAssetDialogState extends State<_UploadAssetDialog> {
   Future<void> _pickFile() async {
     final result = await FilePicker.platform.pickFiles(
       type: _type == 'image' ? FileType.image : FileType.any,
+      allowedExtensions: _type == 'html' ? ['html', 'htm'] : null,
       withData: true,
     );
     if (result != null && result.files.isNotEmpty) {
@@ -446,6 +451,7 @@ class _UploadAssetDialogState extends State<_UploadAssetDialog> {
       title: _titleController.text.trim(),
       fileBytes: _file!.bytes!,
       filename: _file!.name,
+      folderId: widget.folderId,
     );
     if (!mounted) return;
     setState(() => _isUploading = false);
@@ -470,7 +476,8 @@ class _UploadAssetDialogState extends State<_UploadAssetDialog> {
             SegmentedButton<String>(
               segments: const [
                 ButtonSegment(value: 'image', label: Text('Image')),
-                ButtonSegment(value: 'snippet', label: Text('Python snippet')),
+                ButtonSegment(value: 'snippet', label: Text('Python')),
+                ButtonSegment(value: 'html', label: Text('HTML')),
               ],
               selected: {_type},
               onSelectionChanged: (s) => setState(() {
@@ -478,6 +485,17 @@ class _UploadAssetDialogState extends State<_UploadAssetDialog> {
                 _file = null;
               }),
             ),
+            if (_type == 'html') ...[
+              const SizedBox(height: 8),
+              Text(
+                'HTML pages are watermarked with an on-page overlay, not baked into '
+                'pixels — view-source is still technically possible. You can grant '
+                'specific viewers the unwatermarked version from "Manage access" after upload.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ],
             const SizedBox(height: 12),
             TextField(
               controller: _titleController,
@@ -535,9 +553,15 @@ class _AssetGrantsDialog extends StatefulWidget {
 class _AssetGrantsDialogState extends State<_AssetGrantsDialog> {
   List<_ViewerOption>? _allViewers;
   Set<int> _grantedUserIds = {};
+  // Only meaningful for type='html' assets — tracks which granted viewers
+  // currently have the watermark overlay OFF (opt-out, so most viewers
+  // simply won't appear in this set — see db.js asset_grants comment).
+  Set<int> _unwatermarkedUserIds = {};
   bool _loading = true;
   final _searchController = TextEditingController();
   String _query = '';
+
+  bool get _isHtmlAsset => widget.asset.type == 'html';
 
   @override
   void initState() {
@@ -569,12 +593,17 @@ class _AssetGrantsDialogState extends State<_AssetGrantsDialog> {
     final viewers = usersRes.ok
         ? (usersRes.body['users'] as List).map((u) => _ViewerOption.fromJson(u as Map<String, dynamic>)).toList()
         : <_ViewerOption>[];
-    final granted =
-        grantsRes.ok ? (grantsRes.body['grants'] as List).map((g) => g['user_id'] as int).toSet() : <int>{};
+    final grants = grantsRes.ok ? (grantsRes.body['grants'] as List).cast<Map<String, dynamic>>() : <Map<String, dynamic>>[];
+    final granted = grants.map((g) => g['user_id'] as int).toSet();
+    final unwatermarked = grants
+        .where((g) => g['watermark_enabled'] == 0 || g['watermark_enabled'] == false)
+        .map((g) => g['user_id'] as int)
+        .toSet();
 
     setState(() {
       _allViewers = viewers;
       _grantedUserIds = granted;
+      _unwatermarkedUserIds = unwatermarked;
       _loading = false;
     });
   }
@@ -582,7 +611,11 @@ class _AssetGrantsDialogState extends State<_AssetGrantsDialog> {
   Future<void> _toggle(_ViewerOption viewer, bool grant) async {
     final api = context.read<ApiClient>();
     final res = grant
-        ? await api.grantAsset(widget.asset.id, viewer.id)
+        ? await api.grantAsset(
+            widget.asset.id,
+            viewer.id,
+            watermarkEnabled: !_unwatermarkedUserIds.contains(viewer.id),
+          )
         : await api.revokeAssetGrant(widget.asset.id, viewer.id);
     if (!mounted) return;
     if (res.ok) {
@@ -596,19 +629,54 @@ class _AssetGrantsDialogState extends State<_AssetGrantsDialog> {
     }
   }
 
+  Future<void> _toggleWatermark(_ViewerOption viewer, bool watermarkEnabled) async {
+    final api = context.read<ApiClient>();
+    // Re-granting an already-granted viewer updates their watermark flag
+    // (see backend/src/routes/admin.js POST /assets/:id/grants) rather than
+    // being a no-op, so this is the same call as granting, just with the
+    // viewer already present — no separate "update grant" endpoint needed.
+    final res = await api.grantAsset(widget.asset.id, viewer.id, watermarkEnabled: watermarkEnabled);
+    if (!mounted) return;
+    if (res.ok) {
+      setState(() {
+        if (watermarkEnabled) {
+          _unwatermarkedUserIds.remove(viewer.id);
+        } else {
+          _unwatermarkedUserIds.add(viewer.id);
+        }
+      });
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res.error ?? 'Could not update watermark setting')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final filtered = _filteredViewers;
     return AlertDialog(
       title: Text('Access to "${widget.asset.title}"'),
       content: SizedBox(
-        width: 360,
-        height: 440,
+        width: 380,
+        height: 460,
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (_isHtmlAsset)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        'HTML pages are watermarked by default. Turn it off for a specific '
+                        'granted viewer below to give them the unwatermarked version.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                      ),
+                    ),
                   if ((_allViewers?.length ?? 0) > 5)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
@@ -631,11 +699,41 @@ class _AssetGrantsDialogState extends State<_AssetGrantsDialog> {
                                 itemBuilder: (context, i) {
                                   final viewer = filtered[i];
                                   final granted = _grantedUserIds.contains(viewer.id);
-                                  return CheckboxListTile(
-                                    value: granted,
-                                    title: Text(viewer.displayName),
-                                    subtitle: Text(viewer.email),
-                                    onChanged: (value) => _toggle(viewer, value ?? false),
+                                  final watermarked = !_unwatermarkedUserIds.contains(viewer.id);
+                                  return Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      CheckboxListTile(
+                                        value: granted,
+                                        title: Text(viewer.displayName),
+                                        subtitle: Text(viewer.email),
+                                        onChanged: (value) => _toggle(viewer, value ?? false),
+                                      ),
+                                      if (_isHtmlAsset && granted)
+                                        Padding(
+                                          padding: const EdgeInsets.only(left: 32, right: 8, bottom: 8),
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                watermarked ? Icons.water_drop_outlined : Icons.water_drop,
+                                                size: 16,
+                                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Expanded(
+                                                child: Text(
+                                                  watermarked ? 'Watermarked' : 'No watermark',
+                                                  style: Theme.of(context).textTheme.bodySmall,
+                                                ),
+                                              ),
+                                              Switch(
+                                                value: watermarked,
+                                                onChanged: (v) => _toggleWatermark(viewer, v),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                    ],
                                   );
                                 },
                               )),

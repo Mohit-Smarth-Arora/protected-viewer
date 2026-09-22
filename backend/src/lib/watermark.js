@@ -127,4 +127,62 @@ async function watermarkCodeSnippet(code, label, opts = {}) {
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
-module.exports = { watermarkImage, watermarkCodeSnippet, OWNERSHIP_LINE };
+// Builds the watermark overlay as a standalone HTML fragment: a fixed,
+// full-viewport, pointer-events:none layer with a repeating diagonal tiled
+// background (same visual language as the image/snippet watermark — a tiled
+// mark survives cropping/scrolling, a single corner mark doesn't) plus a
+// small fixed banner pinned to the top so it's visible even if the page's
+// own background hides the tile. This is NOT pixel-baked — it's real DOM/CSS
+// sitting on top of the page, so it's exactly as removable as any other
+// element via devtools. Accepted tradeoff for this asset type (see db.js
+// assets.type comment) — it deters casual screenshot/redistribution and
+// keeps every view attributable, it does not prevent extraction by someone
+// willing to open devtools.
+function buildHtmlWatermarkOverlay(label) {
+  const lines = [label, OWNERSHIP_LINE];
+  const safeLines = lines.map(escapeXml);
+  const tileText = safeLines.join(String.fromCharCode(10));
+
+  // Reuses the same tiled-SVG approach as the image watermark, but as a CSS
+  // background-image data URI on a fixed overlay div instead of a sharp
+  // composite — same tiling geometry, different delivery mechanism.
+  const tileSvg = `<svg xmlns='http://www.w3.org/2000/svg' width='340' height='170'>
+    <text x='0' y='60' transform='rotate(-30 0 60)' font-family='DejaVu Sans, sans-serif' font-size='16' fill='rgba(120,120,120,0.28)'>
+      <tspan x='0' dy='0'>${safeLines[0]}</tspan>
+      <tspan x='0' dy='18'>${safeLines[1]}</tspan>
+    </text>
+  </svg>`;
+  const encodedTile = Buffer.from(tileSvg).toString('base64');
+
+  return `
+<div id="__pv_watermark_overlay" style="
+  position:fixed; inset:0; z-index:2147483647; pointer-events:none;
+  background-image:url('data:image/svg+xml;base64,${encodedTile}');
+  background-repeat:repeat;
+"></div>
+<div id="__pv_watermark_banner" style="
+  position:fixed; top:0; left:0; right:0; z-index:2147483647; pointer-events:none;
+  background:rgba(20,20,20,0.72); color:#fff; font:12px 'DejaVu Sans', sans-serif;
+  padding:4px 10px; text-align:center; white-space:pre-line;
+">${tileText}</div>
+`;
+}
+
+// Injects the watermark overlay into a raw HTML document, right before
+// </body> (so it renders after — and visually on top of — the page's own
+// content), or appended at the end if the document has no </body> tag at
+// all (e.g. a bare HTML fragment rather than a full document).
+function injectWatermarkIntoHtml(html, label) {
+  const overlay = buildHtmlWatermarkOverlay(label);
+  if (/<\/body>/i.test(html)) {
+    return html.replace(/<\/body>/i, `${overlay}</body>`);
+  }
+  return `${html}\n${overlay}`;
+}
+
+module.exports = {
+  watermarkImage,
+  watermarkCodeSnippet,
+  injectWatermarkIntoHtml,
+  OWNERSHIP_LINE,
+};

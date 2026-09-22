@@ -6,10 +6,14 @@ const requireAuth = require('../middleware/requireAuth');
 const requireAgreement = require('../middleware/requireAgreement');
 const requireActiveAccount = require('../middleware/requireActiveAccount');
 const { issueAssetToken, verifyAssetToken } = require('../lib/auth');
-const { watermarkImage, watermarkCodeSnippet } = require('../lib/watermark');
+const { watermarkImage, watermarkCodeSnippet, injectWatermarkIntoHtml } = require('../lib/watermark');
 const { STORAGE_ROOT } = require('../lib/paths');
 const { isAdmin } = require('../lib/permissions');
-const { hasAccessToAsset: folderAwareHasAccessToAsset, hasAccessToFolder } = require('../lib/folders');
+const {
+  hasAccessToAsset: folderAwareHasAccessToAsset,
+  hasAccessToFolder,
+  shouldWatermarkHtmlFor,
+} = require('../lib/folders');
 
 const router = express.Router();
 const ASSET_TOKEN_TTL = parseInt(process.env.ASSET_TOKEN_TTL_SECONDS || '120', 10);
@@ -136,6 +140,27 @@ router.get('/:id/content', async (req, res) => {
       res.set('Content-Type', 'image/png');
       res.set('Cache-Control', 'no-store');
       return res.send(buffer);
+    }
+
+    if (asset.type === 'html') {
+      const html = fs.readFileSync(absolutePath, 'utf8');
+      // Admins/owner viewing their own library always see the watermark
+      // (there's no "grant" row for them to carry a watermark_enabled=0
+      // exception — that flag is a viewer-specific opt-out, never implicit).
+      const watermarked = isAdmin(user) ? true : shouldWatermarkHtmlFor(user.id, asset.id);
+      const output = watermarked ? injectWatermarkIntoHtml(html, label) : html;
+      res.set('Content-Type', 'text/html; charset=utf-8');
+      res.set('Cache-Control', 'no-store');
+      // helmet() (app.js) sets X-Frame-Options: SAMEORIGIN + a
+      // frame-ancestors 'self' CSP globally, which would block the Flutter
+      // web app (a different origin — GitHub Pages) from iframing this
+      // route. Both are overridden here, scoped to only this one response:
+      // the token check above is what actually gates who can load this
+      // content, not the framing headers — this route was always designed
+      // to be embedded by the app's own iframe viewer.
+      res.removeHeader('X-Frame-Options');
+      res.set('Content-Security-Policy', "frame-ancestors *");
+      return res.send(output);
     }
 
     // Video watermarking (ffmpeg/HLS pipeline) lands in a later step —

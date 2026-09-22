@@ -208,7 +208,10 @@ backend/
       paths.js                STORAGE_ROOT-based paths (data/assets/admin_photos)
       uploads.js              multer config for admin photos + asset uploads
       watermark.js            Server-side image & code-snippet watermarking (sharp),
-                               always appends the ownership line to every render
+                               always appends the ownership line to every render.
+                               Also builds the HTML watermark overlay (DOM/CSS,
+                               not baked pixels) for type='html' assets — see
+                               "HTML assets" under How the security model works
       fonts.js                Must load before 'sharp' — bundles fonts so rendering
                                doesn't depend on host OS fonts (see git history)
       bootstrap.js             Seeds a fresh empty storage volume on first boot
@@ -268,6 +271,10 @@ frontend/                  Flutter app (web + android platforms scaffolded)
                                    BrandMark) for the pre-signed-in gate screens
                                    (login, email verification, pending approval,
                                    agreement)
+      inline_iframe.dart           Web-only <iframe> platform view, used to
+                                   render type='html' assets in-app (see
+                                   html_asset_viewer_screen.dart) instead of
+                                   navigating to a new browser tab
 
 .github/workflows/deploy-frontend.yml   Builds + deploys frontend to GitHub Pages
 ```
@@ -291,10 +298,45 @@ frontend/                  Flutter app (web + android platforms scaffolded)
    asset, timestamp, IP, user agent) — the traceability net if something
    leaks.
 
-There is **no route that serves a raw file** to a viewer. Admin-request
-verification photos are the one exception, served unwatermarked but only
-to master-access accounts, for manual identity review — never exposed
-through the public asset routes.
+There is **no route that serves a raw file** to a viewer, with one
+deliberate, weaker-tier exception:
+
+### HTML assets (a different protection tier)
+
+`type: 'html'` assets are raw HTML documents (uploaded as a single `.html`
+file) rendered in-app via an iframe pointed at the same tokened content
+route, rather than flattened to a screenshot like images/snippets — the
+point is to keep the page's real interactivity intact. That means the
+usual "pixels only, raw bytes never leave the server" guarantee **does
+not apply** here: view-source and save-page-as still work on an HTML
+asset, the same as they would on any page in a browser. Nothing can make
+arbitrary HTML rendered client-side truly copy-proof.
+
+What HTML assets still get:
+- The same access-control and short-lived-token gating as every other
+  asset — no route serves an HTML asset's content without a valid,
+  asset-scoped token.
+- A watermark overlay (viewer email + timestamp + the ownership line)
+  injected into the HTML itself server-side, per request, right before
+  `</body>` (`lib/watermark.js` `injectWatermarkIntoHtml`) — visible DOM,
+  not baked pixels, so it deters casual screenshotting/redistribution and
+  keeps every view attributable, but is removable via devtools by anyone
+  who goes looking.
+- The same `access_log` traceability as every other view.
+- A per-viewer watermark toggle: an admin can grant a specific viewer the
+  asset with the watermark overlay turned off (`asset_grants.watermark_enabled`),
+  from the "Manage access" dialog on the asset. Defaults on; access via a
+  folder grant (rather than a direct per-asset grant) or as an admin/owner
+  always watermarks — the no-watermark exception is opt-in per viewer,
+  never implicit.
+
+The iframe is Flutter-Web-only for now (`dart:ui_web` platform view) — no
+webview package is pulled in for Android/iOS yet, so HTML assets aren't
+viewable there.
+
+Admin-request verification photos are the other raw-file exception,
+served unwatermarked but only to master-access accounts, for manual
+identity review — never exposed through the public asset routes.
 
 ## Running locally
 
@@ -356,3 +398,7 @@ flutter run -d chrome     # requires CHROME_EXECUTABLE if Chrome isn't on
   UX friction only, not a security boundary — see threat model above. The
   real protection is that bytes are already watermarked server-side before
   they reach the client.
+- `type: 'html'` assets are a deliberately weaker protection tier — see
+  "HTML assets" under How the security model works. View-source and
+  save-page-as work on them; only use this asset type for content you're
+  comfortable being extractable by a viewer willing to open devtools.

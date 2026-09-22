@@ -15,6 +15,7 @@ MediaType? _mediaTypeForFilename(String filename) {
     'png' => MediaType('image', 'png'),
     'webp' => MediaType('image', 'webp'),
     'py' => MediaType('text', 'plain'),
+    'html' || 'htm' => MediaType('text', 'html'),
     _ => null, // let http fall back to its own default rather than guess wrong
   };
 }
@@ -130,6 +131,18 @@ class ApiClient {
   /// success — there is no unwatermarked version this client can ever reach.
   Future<http.Response> fetchAssetContent(String assetId, String assetToken) {
     return http.get(_uri('/api/assets/$assetId/content?token=$assetToken'));
+  }
+
+  /// Same content route as [fetchAssetContent], but as a URL rather than a
+  /// fetched response — used for type='html' assets, which are rendered by
+  /// pointing an iframe straight at this URL rather than fetching bytes into
+  /// Dart first (the server-injected watermark and all page behavior need a
+  /// real browsing context, not just raw HTML text in a Dart string). The
+  /// token is still short-lived and single-asset-scoped like every other
+  /// asset access — this doesn't bypass that, it's the same URL
+  /// [fetchAssetContent] would GET, just handed to an iframe instead.
+  String assetContentUrl(String assetId, String assetToken) {
+    return _uri('/api/assets/$assetId/content?token=$assetToken').toString();
   }
 
   // ---- Admin request (viewer applying to become admin) -----------------
@@ -258,6 +271,7 @@ class ApiClient {
     required String title,
     required Uint8List fileBytes,
     required String filename,
+    String? folderId,
   }) async {
     final request = http.MultipartRequest('POST', _uri('/api/admin/assets'))
       ..headers.addAll({if (_sessionToken != null) 'Authorization': 'Bearer $_sessionToken'})
@@ -269,6 +283,7 @@ class ApiClient {
         filename: filename,
         contentType: _mediaTypeForFilename(filename),
       ));
+    if (folderId != null) request.fields['folderId'] = folderId;
 
     final streamed = await request.send();
     final res = await http.Response.fromStream(streamed);
@@ -290,11 +305,15 @@ class ApiClient {
     return ApiResult.fromResponse(res);
   }
 
-  Future<ApiResult> grantAsset(String assetId, int userId) async {
+  /// [watermarkEnabled] only matters for type='html' assets — image/snippet
+  /// are always pixel-watermarked server-side regardless of this flag. Also
+  /// used to flip the flag on an already-granted viewer (re-granting
+  /// updates it rather than being a no-op — see backend/src/routes/admin.js).
+  Future<ApiResult> grantAsset(String assetId, int userId, {bool watermarkEnabled = true}) async {
     final res = await http.post(
       _uri('/api/admin/assets/$assetId/grants'),
       headers: _authHeaders,
-      body: jsonEncode({'userId': userId}),
+      body: jsonEncode({'userId': userId, 'watermarkEnabled': watermarkEnabled}),
     );
     return ApiResult.fromResponse(res);
   }

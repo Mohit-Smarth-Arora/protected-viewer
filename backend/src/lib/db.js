@@ -101,9 +101,16 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- type 'html': a raw HTML document, served inline (not flattened to an
+  -- image) with a server-injected watermark overlay per request — see
+  -- lib/watermark.js injectWatermarkIntoHtml. Weaker protection than
+  -- image/snippet (view-source and save-page-as still work; nothing about
+  -- HTML rendered in a browser can be made truly copy-proof), accepted
+  -- deliberately for this asset type rather than flattening it to a
+  -- screenshot, which would defeat the point of it being an interactive page.
   CREATE TABLE IF NOT EXISTS assets (
     id TEXT PRIMARY KEY,
-    type TEXT NOT NULL CHECK (type IN ('image', 'video', 'snippet')),
+    type TEXT NOT NULL CHECK (type IN ('image', 'video', 'snippet', 'html')),
     title TEXT NOT NULL,
     file_path TEXT NOT NULL,
     folder_id TEXT REFERENCES folders(id),
@@ -114,10 +121,16 @@ db.exec(`
   -- Per-user, per-asset access grants. Kept for assets at root (no folder)
   -- or for granting a single asset without granting its whole folder.
   -- Admins/owner always have implicit access to everything.
+  -- watermark_enabled: per-grant override, meaningful for type='html' only
+  -- (image/snippet are always watermarked — there's no unwatermarked path
+  -- for those, the pixels are baked server-side regardless). Defaults on;
+  -- an admin can grant a specific viewer the unwatermarked version of an
+  -- HTML asset by turning this off for their grant row specifically.
   CREATE TABLE IF NOT EXISTS asset_grants (
     user_id INTEGER NOT NULL REFERENCES users(id),
     asset_id TEXT NOT NULL REFERENCES assets(id),
     granted_by INTEGER NOT NULL REFERENCES users(id),
+    watermark_enabled INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (user_id, asset_id)
   );
@@ -239,6 +252,45 @@ ensureColumn('access_log', 'asset_title', 'TEXT');
 ensureColumn('access_log', 'user_email', 'TEXT');
 const emailVerifiedColumnIsNew = ensureColumn('users', 'email_verified', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('users', 'signup_status', "TEXT NOT NULL DEFAULT 'active'");
+ensureColumn('asset_grants', 'watermark_enabled', 'INTEGER NOT NULL DEFAULT 1');
+
+// SQLite can't ALTER a CHECK constraint in place, so widening
+// assets.type to allow 'html' (added after the original 'image'/'video'/
+// 'snippet' set) requires a rebuild-and-swap on any DB created before this
+// change. Detected by checking the table's own SQL text for the new value
+// — idempotent, a no-op on both fresh installs (already correct) and DBs
+// that have already been migrated once.
+const assetsTableSql = db
+  .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'assets'")
+  .get();
+if (assetsTableSql && !assetsTableSql.sql.includes("'html'")) {
+  // asset_grants (and access_log, though that one has no real FK — see its
+  // own comment) hold rows referencing assets.id, so this rebuild has to
+  // happen with foreign key enforcement OFF, or SQLite refuses the DROP
+  // TABLE partway through with SQLITE_CONSTRAINT_FOREIGNKEY. PRAGMA
+  // foreign_keys is a documented no-op inside a transaction, so it's
+  // toggled outside of one, matching SQLite's own recommended
+  // "12-step" procedure for changing a table referenced by others.
+  db.pragma('foreign_keys = OFF');
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE assets_new (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL CHECK (type IN ('image', 'video', 'snippet', 'html')),
+        title TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        folder_id TEXT REFERENCES folders(id),
+        uploaded_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO assets_new SELECT id, type, title, file_path, folder_id, uploaded_by, created_at FROM assets;
+      DROP TABLE assets;
+      ALTER TABLE assets_new RENAME TO assets;
+    `);
+  })();
+  db.pragma('foreign_key_check');
+  db.pragma('foreign_keys = ON');
+}
 
 // Existing accounts (from before this feature existed) should not suddenly
 // be locked out by the new email-verification requirement — grandfather

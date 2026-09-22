@@ -5,6 +5,7 @@ import '../theme.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/state_views.dart';
 import 'asset_viewer_screen.dart';
+import 'html_asset_viewer_screen.dart';
 
 class AssetSummary {
   AssetSummary({required this.id, required this.type, required this.title});
@@ -23,6 +24,7 @@ class AssetSummary {
         'image' => Icons.image_outlined,
         'video' => Icons.videocam_outlined,
         'snippet' => Icons.code_outlined,
+        'html' => Icons.web_outlined,
         _ => Icons.insert_drive_file_outlined,
       };
 }
@@ -244,7 +246,11 @@ class _AssetListScreenState extends State<AssetListScreen> {
               trailing: const Icon(Icons.chevron_right),
               onTap: () {
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => AssetViewerScreen(asset: asset)),
+                  MaterialPageRoute(
+                    builder: (_) => asset.type == 'html'
+                        ? HtmlAssetViewerScreen(asset: asset)
+                        : AssetViewerScreen(asset: asset),
+                  ),
                 );
               },
             ),
