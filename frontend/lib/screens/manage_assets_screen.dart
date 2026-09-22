@@ -422,13 +422,27 @@ class _UploadAssetDialogState extends State<_UploadAssetDialog> {
   }
 
   Future<void> _pickFile() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: _type == 'image' ? FileType.image : FileType.any,
-      allowedExtensions: _type == 'html' ? ['html', 'htm'] : null,
-      withData: true,
-    );
-    if (result != null && result.files.isNotEmpty) {
-      setState(() => _file = result.files.first);
+    try {
+      // file_picker's web implementation throws if allowedExtensions is
+      // passed alongside anything other than FileType.custom — the picker
+      // never opens and (with no try/catch, as this previously had none)
+      // the thrown exception was silently swallowed by the async error
+      // zone, which is why "Select file" appeared to do nothing for html.
+      final result = await FilePicker.platform.pickFiles(
+        type: _type == 'image'
+            ? FileType.image
+            : _type == 'html'
+                ? FileType.custom
+                : FileType.any,
+        allowedExtensions: _type == 'html' ? ['html', 'htm'] : null,
+        withData: true,
+      );
+      if (result != null && result.files.isNotEmpty) {
+        setState(() => _file = result.files.first);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = 'Could not open file picker: $e');
     }
   }
 
